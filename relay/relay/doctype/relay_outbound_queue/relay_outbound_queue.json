@@ -17,12 +17,15 @@
   "content_type",
   "scheduled_at",
   "section_break_1",
+  "subject",
   "message_body",
+  "html_body",
   "template",
   "template_parameters",
   "column_break_2",
   "media_url",
   "interactive_payload",
+  "recipient_data",
   "section_break_2",
   "attempts",
   "last_attempt_at",
@@ -87,9 +90,19 @@
    "fieldtype": "Section Break"
   },
   {
+   "fieldname": "subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
    "fieldname": "message_body",
    "fieldtype": "Text",
    "label": "Message Body"
+  },
+  {
+   "fieldname": "html_body",
+   "fieldtype": "Text Editor",
+   "label": "HTML Body"
   },
   {
    "fieldname": "template",
@@ -115,6 +128,11 @@
    "fieldname": "interactive_payload",
    "fieldtype": "JSON",
    "label": "Interactive Payload"
+  },
+  {
+   "fieldname": "recipient_data",
+   "fieldtype": "JSON",
+   "label": "Recipient Data"
   },
   {
    "fieldname": "section_break_2",
@@ -156,7 +174,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 16:30:00.000000",
+ "modified": "2026-07-17 19:21:46.814290",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Outbound Queue",
