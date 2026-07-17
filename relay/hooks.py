@@ -3,9 +3,9 @@
 
 app_name = "relay"
 app_title = "Relay"
-app_publisher = "Pharmcare"
+app_publisher = "Jeriel Francis (trading as Seityl)"
 app_description = "Multi-channel business messaging for Frappe"
-app_email = "dev@pharmcare.kn"
+app_email = "jeriel@seityl.com"
 app_license = "mit"
 
 # Apps
