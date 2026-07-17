@@ -8,6 +8,7 @@ import json
 import frappe
 from frappe.utils.safe_exec import get_safe_globals, safe_exec
 
+from relay.integrations.registry import get_adapter
 from relay.relay.doctype.relay_account.relay_account import get_default_account
 from relay.relay.doctype.relay_message.relay_message import send_message
 
@@ -59,11 +60,11 @@ def send_notification(notification_name: str, doctype: str, docname: str):
 		if not _evaluate_condition(notification.condition, ref_doc):
 			return
 
-	phone = _resolve_phone(ref_doc, notification.phone_field)
-	if not phone:
+	identifier_type, identifier_value = _resolve_recipient(ref_doc, notification)
+	if not identifier_value:
 		frappe.log_error(
 			title="Relay Notification Failed",
-			message=f"No phone number resolved for {doctype} {docname}",
+			message=f"No recipient resolved for {doctype} {docname}",
 		)
 		return
 
@@ -87,7 +88,8 @@ def send_notification(notification_name: str, doctype: str, docname: str):
 
 	try:
 		result = send_message(
-			phone_number=phone,
+			recipient_type=identifier_type,
+			recipient_value=identifier_value,
 			template=notification.template,
 			template_parameters=parameters,
 			account=account,
@@ -172,17 +174,48 @@ def _evaluate_condition(condition: str, doc) -> bool:
 		return False
 
 
-def _resolve_phone(doc, phone_field: str) -> str | None:
-	"""Resolve phone number from a document field."""
-	if phone_field:
-		value = doc.get(phone_field)
+def _resolve_recipient(doc, notification) -> tuple[str, str]:
+	"""Resolve recipient identifier type and value from a document."""
+	identifier_type = notification.recipient_type or ""
+	field_name = notification.recipient_field or ""
+
+	if field_name:
+		value = doc.get(field_name)
 		if value:
-			return str(value)
+			if not identifier_type:
+				identifier_type = _guess_identifier_type(value)
+			return identifier_type, str(value)
 
 	# Common fallbacks
-	for field in ("mobile_no", "phone", "mobile_number", "whatsapp_number", "contact_number"):
-		value = doc.get(field)
-		if value:
-			return str(value)
+	for fallback_type, fields in {
+		"Phone": ("mobile_no", "phone", "mobile_number", "whatsapp_number", "contact_number"),
+		"Email": ("email_id", "email", "email_address"),
+		"Chat ID": ("telegram_id", "chat_id"),
+		"Username": ("username", "user_name", "telegram_username"),
+	}.items():
+		for field in fields:
+			value = doc.get(field)
+			if value:
+				return fallback_type, str(value)
 
-	return None
+	# Default to account's preferred recipient type
+	account_name = notification.account or get_default_account("outgoing")
+	if account_name:
+		account = frappe.get_doc("Relay Account", account_name)
+		channel = frappe.get_doc("Relay Channel", account.channel)
+		adapter = get_adapter(channel.provider, account)
+		identifier_type = adapter.get_default_recipient_type()
+
+		if account.identifier_type == identifier_type and account.identifier_value:
+			return identifier_type, account.identifier_value
+
+	return identifier_type, ""
+
+
+def _guess_identifier_type(value: str) -> str:
+	"""Best-effort guess of identifier type from a value."""
+	if "@" in str(value):
+		return "Email"
+	if str(value).isdigit() or str(value).lstrip("+").isdigit():
+		return "Phone"
+	return "Username"

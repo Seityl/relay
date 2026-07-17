@@ -12,11 +12,15 @@
   "status",
   "channel",
   "column_break_1",
+  "identifier_type",
+  "identifier_value",
   "phone_number_id",
   "business_account_id",
   "app_id",
   "credentials_section",
   "access_token",
+  "credentials",
+  "default_sender_address",
   "api_url",
   "api_version",
   "column_break_2",
@@ -56,10 +60,20 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "identifier_type",
+   "fieldtype": "Select",
+   "label": "Identifier Type",
+   "options": "Phone\nEmail\nChat ID\nUsername\nOther"
+  },
+  {
+   "fieldname": "identifier_value",
+   "fieldtype": "Data",
+   "label": "Identifier Value"
+  },
+  {
    "fieldname": "phone_number_id",
    "fieldtype": "Data",
    "label": "Phone Number ID",
-   "reqd": 1,
    "unique": 1
   },
   {
@@ -81,8 +95,19 @@
    "fieldname": "access_token",
    "fieldtype": "Password",
    "label": "Access Token",
-   "length": 500,
-   "reqd": 1
+   "length": 500
+  },
+  {
+   "fieldname": "credentials",
+   "fieldtype": "JSON",
+   "label": "Credentials",
+   "description": "Provider-specific secrets and configuration"
+  },
+  {
+   "fieldname": "default_sender_address",
+   "fieldtype": "Data",
+   "label": "Default Sender Address",
+   "description": "Email from-address for this account"
   },
   {
    "default": "https://graph.facebook.com",

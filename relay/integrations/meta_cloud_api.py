@@ -1,11 +1,7 @@
 # Copyright (c) 2026, Jeriel Francis (trading as Seityl) and contributors
 # For license information, please see license.txt
 
-"""Adapter for Meta's Cloud messaging API.
-
-This module is intentionally provider-specific. A new adapter can be added for
-SMS, RCS, or other messaging providers by implementing the same interface.
-"""
+"""Adapter for Meta's Cloud messaging API."""
 
 import json
 from typing import Any
@@ -13,13 +9,25 @@ from typing import Any
 import frappe
 import requests
 from frappe import _
+from werkzeug.wrappers import Response
+
+from relay.integrations.base_adapter import (
+	Attachment,
+	BaseChannelAdapter,
+	InboundMessage,
+	InboundPayload,
+	NormalizedRecipient,
+	StatusEvent,
+	TemplateStatusEvent,
+)
+from relay.integrations.registry import register
 
 
-class MetaCloudAPIAdapter:
+class MetaCloudAPIAdapter(BaseChannelAdapter):
 	"""Send and receive messages via Meta's Cloud API."""
 
 	def __init__(self, account_doc):
-		self.account = account_doc
+		super().__init__(account_doc)
 		self.token = account_doc.get_access_token()
 		self.base_url = account_doc.get_api_base_url()
 		self.phone_id = account_doc.phone_number_id
@@ -35,7 +43,7 @@ class MetaCloudAPIAdapter:
 
 	def send(self, queue_doc) -> str:
 		"""Dispatch a queue entry and return the provider message id."""
-		phone = self._format_number(queue_doc.contact)
+		phone = self._resolve_recipient(queue_doc.contact)
 
 		if queue_doc.message_type == "Template":
 			payload = self._build_template_payload(phone, queue_doc)
@@ -46,6 +54,13 @@ class MetaCloudAPIAdapter:
 
 		response = self._post(f"{self.phone_id}/messages", payload)
 		return response["messages"][0]["id"]
+
+	def _resolve_recipient(self, contact_name: str) -> str:
+		"""Return normalized phone number for a Relay Contact."""
+		contact = frappe.get_doc("Relay Contact", contact_name)
+		identifier = contact.get_identifier("Phone")
+		value = identifier.identifier_value if identifier else contact_name
+		return self.normalize_identifier("Phone", value)
 
 	def _build_freeform_payload(self, phone: str, queue_doc) -> dict:
 		content_type = queue_doc.content_type or "text"
@@ -86,6 +101,7 @@ class MetaCloudAPIAdapter:
 			if header_param:
 				components.append({"type": "header", "parameters": [header_param]})
 
+		language_code = template_doc.language_code or "en"
 		return {
 			"messaging_product": "whatsapp",
 			"recipient_type": "individual",
@@ -93,7 +109,7 @@ class MetaCloudAPIAdapter:
 			"type": "template",
 			"template": {
 				"name": template_doc.actual_name or template_doc.template_name,
-				"language": {"code": template_doc.language_code},
+				"language": {"code": language_code},
 				"components": components,
 			},
 		}
@@ -158,6 +174,246 @@ class MetaCloudAPIAdapter:
 		content_response.raise_for_status()
 		return content_response.content, mime_type
 
-	def _format_number(self, contact_name: str) -> str:
-		phone = frappe.db.get_value("Relay Contact", contact_name, "phone_number")
-		return phone.lstrip("+") if phone else contact_name.lstrip("+")
+	def verify_webhook(self, request_args: dict) -> Response | None:
+		"""Handle Meta subscription verification handshake."""
+		challenge = request_args.get("hub.challenge")
+		verify_token = request_args.get("hub.verify_token")
+
+		account = frappe.db.get_value(
+			"Relay Account",
+			{"webhook_verify_token": verify_token, "status": "Active"},
+			"name",
+		)
+		if not account:
+			frappe.throw("Invalid verify token")
+
+		return Response(challenge, status=200)
+
+	def parse_inbound_webhook(
+		self, payload: dict, account_name: str | None = None
+	) -> InboundPayload:
+		"""Normalize a Meta webhook payload into Relay dataclasses."""
+		result = InboundPayload(account_name=account_name or "")
+
+		for entry in payload.get("entry", []):
+			for change in entry.get("changes", []):
+				field = change.get("field")
+				value = change.get("value", {})
+
+				if field == "messages":
+					self._parse_messages(value, result)
+				elif field == "message_template_status_update":
+					self._parse_template_status(value, result)
+
+		return result
+
+	def _parse_messages(self, value: dict, result: InboundPayload):
+		"""Parse inbound messages and status updates from a Meta value object."""
+		phone_id = value.get("metadata", {}).get("phone_number_id")
+		account_name = result.account_name or self._resolve_account(phone_id)
+		result.account_name = account_name
+
+		contacts = {
+			c.get("wa_id"): c.get("profile", {}).get("name")
+			for c in value.get("contacts", [])
+		}
+
+		for message in value.get("messages", []):
+			result.messages.append(self._parse_inbound_message(message, contacts))
+
+		for status in value.get("statuses", []):
+			result.status_events.append(self._parse_status_update(status))
+
+	def _resolve_account(self, phone_id: str | None) -> str:
+		"""Resolve provider phone number id to a Relay Account."""
+		from relay.relay.doctype.relay_account.relay_account import get_default_account
+
+		if phone_id:
+			account = frappe.db.get_value(
+				"Relay Account", {"phone_number_id": phone_id, "status": "Active"}, "name"
+			)
+			if account:
+				return account
+		return get_default_account("incoming") or ""
+
+	def _parse_inbound_message(
+		self, message: dict, contacts: dict
+	) -> InboundMessage:
+		"""Normalize a single Meta inbound message."""
+		from_number = message.get("from", "")
+		profile_name = contacts.get(from_number)
+
+		message_type = message.get("type", "unknown")
+		content_type = message_type
+		body = ""
+		attachments = []
+		interactive_payload = None
+
+		if message_type == "text":
+			body = message["text"].get("body", "")
+		elif message_type == "reaction":
+			body = message["reaction"].get("emoji", "")
+			content_type = "reaction"
+		elif message_type == "interactive":
+			interactive_payload = message.get("interactive", {})
+			content_type = "interactive"
+			body = self._summarize_interactive(interactive_payload)
+		elif message_type == "order":
+			body = "New order received"
+			content_type = "order"
+		elif message_type in ("image", "document", "audio", "video"):
+			content_type = message_type
+			body = message[message_type].get("caption", "")
+			media_payload = message[message_type]
+			attachments.append(
+				self._build_attachment(media_payload, fallback_body=body)
+			)
+		elif message_type == "button":
+			body = message["button"].get("text", "")
+			content_type = "button"
+		elif message_type == "location":
+			body = json.dumps(message.get("location", {}))
+			content_type = "location"
+		else:
+			body = json.dumps(message.get(message_type, {}))
+
+		return InboundMessage(
+			provider_message_id=message.get("id", ""),
+			conversation_id=message.get("context", {}).get("id", ""),
+			from_identifier=NormalizedRecipient(
+				identifier_type="Phone",
+				identifier_value=self.normalize_identifier("Phone", from_number),
+				display_name=profile_name or "",
+			),
+			message_type="Freeform",
+			content_type=content_type,
+			body=body,
+			attachments=attachments,
+			interactive_payload=interactive_payload or {},
+			reply_to_message_id=message.get("context", {}).get("id", ""),
+			is_reply=bool(message.get("context", {}).get("id")),
+			raw_payload=message,
+		)
+
+	def _parse_status_update(self, status: dict) -> StatusEvent:
+		"""Normalize a Meta status update."""
+		return StatusEvent(
+			provider_message_id=status.get("id", ""),
+			status=self.map_status(status.get("status", "")),
+			conversation_id=status.get("conversation", {}).get("id", ""),
+			error_payload=status.get("errors", {}),
+			raw_payload=status,
+		)
+
+	def _parse_template_status(self, value: dict, result: InboundPayload):
+		"""Normalize a Meta template status update."""
+		result.template_status_events.append(
+			TemplateStatusEvent(
+				provider_template_id=value.get("message_template_id", ""),
+				status=value.get("event", ""),
+				raw_payload=value,
+			)
+		)
+
+	def map_status(self, provider_status: str) -> str:
+		"""Map Meta status strings to Relay Message statuses."""
+		mapping = {
+			"sent": "Sent",
+			"delivered": "Delivered",
+			"read": "Read",
+			"failed": "Failed",
+			"deleted": "Failed",
+		}
+		return mapping.get(provider_status, provider_status)
+
+	def supports(self, feature: str) -> bool:
+		"""Meta Cloud API supports templates, media, interactive, and read receipts."""
+		return feature in {
+			"templates",
+			"media",
+			"interactive",
+			"read_receipts",
+			"webhooks",
+			"status_callbacks",
+		}
+
+	def normalize_identifier(self, identifier_type: str, value: str) -> str:
+		"""Strip leading + from phone numbers for Meta."""
+		value = super().normalize_identifier(identifier_type, value)
+		if identifier_type == "Phone":
+			return value.lstrip("+")
+		return value
+
+	def validate_template(self, template_doc) -> list[str]:
+		"""Validate a template for Meta Cloud API."""
+		errors = []
+		if not template_doc.language_code:
+			errors.append("Language code is required for Meta templates")
+		if not template_doc.category:
+			errors.append("Category is required for Meta templates")
+		return errors
+
+	def format_template(
+		self, template_doc, parameters: dict, recipient: NormalizedRecipient
+	) -> dict:
+		"""Build a Meta-specific template payload."""
+		params = [
+			{"type": "text", "text": str(parameters.get(str(idx + 1), parameters.get(p.parameter_name, "")))}
+			for idx, p in enumerate(sorted(template_doc.parameters, key=lambda x: x.parameter_index))
+		]
+
+		components = [{"type": "body", "parameters": params}]
+		if template_doc.header_type and template_doc.header_sample:
+			header_param = self._build_header_parameter(template_doc)
+			if header_param:
+				components.append({"type": "header", "parameters": [header_param]})
+
+		language_code = template_doc.language_code or "en"
+		return {
+			"messaging_product": "whatsapp",
+			"recipient_type": "individual",
+			"to": self.normalize_identifier("Phone", recipient.identifier_value),
+			"type": "template",
+			"template": {
+				"name": template_doc.actual_name or template_doc.template_name,
+				"language": {"code": language_code},
+				"components": components,
+			},
+		}
+
+	def get_default_recipient_type(self) -> str:
+		return "Phone"
+
+	def _build_attachment(self, media_payload: dict, fallback_body: str = "") -> Attachment:
+		"""Build an Attachment, downloading media bytes when possible."""
+		media_id = media_payload.get("id", "")
+		mime_type = media_payload.get("mime_type", "")
+		content = b""
+
+		if media_id:
+			try:
+				content, mime_type = self.download_media(media_id)
+			except Exception:
+				frappe.log_error(title="Relay Meta Media Download Failed")
+
+		return Attachment(
+			file_url="",
+			file_name=media_payload.get("filename") or fallback_body or media_id,
+			mime_type=mime_type,
+			content=content,
+		)
+
+	def _summarize_interactive(self, payload: dict) -> str:
+		"""Create a short text summary of an interactive response."""
+		interactive_type = payload.get("type")
+		if interactive_type == "button_reply":
+			return payload.get("button_reply", {}).get("id", "")
+		if interactive_type == "list_reply":
+			return payload.get("list_reply", {}).get("id", "")
+		if interactive_type == "nfm_reply":
+			response = json.loads(payload.get("nfm_reply", {}).get("response_json", "{}"))
+			return ", ".join(f"{k}: {v}" for k, v in response.items() if v)
+		return json.dumps(payload)
+
+
+register("Meta Cloud API", MetaCloudAPIAdapter)

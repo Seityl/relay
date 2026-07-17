@@ -37,8 +37,14 @@ class RelayMessage(Document):
 
 @frappe.whitelist()
 def send_message(
-	phone_number: str,
+	recipient_type: str = "",
+	recipient_value: str = "",
 	message_body: str = "",
+	subject: str = "",
+	html_body: str = "",
+	recipient_data: dict | None = None,
+	attachments: list | None = None,
+	phone_number: str = "",
 	template: str = "",
 	template_parameters: dict | None = None,
 	content_type: str = "text",
@@ -52,10 +58,15 @@ def send_message(
 
 	Either `message_body` (free-form) or `template` must be provided.
 	"""
-	if not phone_number:
-		frappe.throw("Phone number is required")
+	# Backward compatibility: legacy phone_number parameter
+	if phone_number and not recipient_value:
+		recipient_type = "Phone"
+		recipient_value = phone_number
 
-	contact = RelayContact.get_or_create(phone_number)
+	if not recipient_type or not recipient_value:
+		frappe.throw("Recipient type and value are required")
+
+	contact = RelayContact.get_or_create(recipient_type, recipient_value)
 	if not account:
 		from relay.relay.doctype.relay_account.relay_account import (
 			get_default_account,
@@ -83,15 +94,30 @@ def send_message(
 			"status": "Pending",
 			"message_type": message_type,
 			"content_type": content_type,
+			"subject": subject,
 			"message_body": message_body,
+			"html_body": html_body,
 			"template": template,
 			"template_parameters": frappe.as_json(template_parameters or {}),
 			"interactive_payload": frappe.as_json(interactive_payload or {}),
 			"media_url": media_url,
+			"recipient_data": frappe.as_json(recipient_data or {}),
 			"reference_doctype": reference_doctype,
 			"reference_name": reference_name,
 		}
 	)
+
+	for attachment in attachments or []:
+		doc.append(
+			"attachments",
+			{
+				"file_url": attachment.get("file_url"),
+				"file_name": attachment.get("file_name"),
+				"mime_type": attachment.get("mime_type"),
+				"caption": attachment.get("caption"),
+			},
+		)
+
 	doc.insert(ignore_permissions=True)
 	frappe.db.commit()
 

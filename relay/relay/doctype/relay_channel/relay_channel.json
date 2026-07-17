@@ -12,6 +12,7 @@
   "provider",
   "enabled",
   "column_break_1",
+  "adapter_class",
   "handler_module",
   "webhook_path",
   "supports_templates",
@@ -32,7 +33,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Provider",
-   "options": "Meta Cloud API",
+   "options": "Meta Cloud API\nEmail\nSMS\nTelegram\nTwilio\nEvolution API\nOther",
    "reqd": 1
   },
   {
@@ -45,6 +46,12 @@
   {
    "fieldname": "column_break_1",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "adapter_class",
+   "fieldtype": "Data",
+   "label": "Adapter Class",
+   "description": "Full Python path to adapter class"
   },
   {
    "fieldname": "handler_module",

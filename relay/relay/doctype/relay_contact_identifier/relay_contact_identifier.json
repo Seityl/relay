@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "hash",
+ "creation": "2026-07-17 16:30:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "identifier_type",
+  "identifier_value",
+  "is_primary",
+  "channel"
+ ],
+ "fields": [
+  {
+   "fieldname": "identifier_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Identifier Type",
+   "options": "Phone\nEmail\nChat ID\nUsername\nOther",
+   "reqd": 1
+  },
+  {
+   "fieldname": "identifier_value",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Identifier Value",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_primary",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Primary"
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "label": "Channel",
+   "options": "Relay Channel"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-17 16:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Relay",
+ "name": "Relay Contact Identifier",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
