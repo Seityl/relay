@@ -1,0 +1,157 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:{template_name}-{language_code}",
+ "creation": "2026-07-17 16:30:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "template_name",
+  "actual_name",
+  "status",
+  "column_break_1",
+  "language",
+  "language_code",
+  "category",
+  "provider_template_id",
+  "section_break_1",
+  "body_text",
+  "sample_values",
+  "parameters",
+  "section_break_2",
+  "header_type",
+  "header_sample",
+  "footer_text",
+  "buttons"
+ ],
+ "fields": [
+  {
+   "fieldname": "template_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Template Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "actual_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Provider Template Name",
+   "read_only": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nPending\nApproved\nRejected\nPaused",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "language",
+   "fieldtype": "Link",
+   "label": "Language",
+   "options": "Language"
+  },
+  {
+   "fieldname": "language_code",
+   "fieldtype": "Data",
+   "label": "Language Code",
+   "reqd": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Select",
+   "label": "Category",
+   "options": "MARKETING\nUTILITY\nAUTHENTICATION",
+   "reqd": 1
+  },
+  {
+   "fieldname": "provider_template_id",
+   "fieldtype": "Data",
+   "label": "Provider Template ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "body_text",
+   "fieldtype": "Text",
+   "label": "Body Text",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sample_values",
+   "fieldtype": "Small Text",
+   "label": "Sample Values",
+   "description": "Comma-separated sample values for template approval"
+  },
+  {
+   "fieldname": "parameters",
+   "fieldtype": "Table",
+   "label": "Parameters",
+   "options": "Relay Template Parameter"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "header_type",
+   "fieldtype": "Select",
+   "label": "Header Type",
+   "options": "\nTEXT\nIMAGE\nDOCUMENT\nVIDEO"
+  },
+  {
+   "fieldname": "header_sample",
+   "fieldtype": "Attach",
+   "label": "Header Sample Media"
+  },
+  {
+   "fieldname": "footer_text",
+   "fieldtype": "Data",
+   "label": "Footer Text"
+  },
+  {
+   "fieldname": "buttons",
+   "fieldtype": "Table",
+   "label": "Buttons",
+   "options": "Relay Button"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-17 16:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Relay",
+ "name": "Relay Template",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

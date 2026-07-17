@@ -1,0 +1,106 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:channel_name",
+ "creation": "2026-07-17 16:30:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "channel_name",
+  "provider",
+  "enabled",
+  "column_break_1",
+  "handler_module",
+  "webhook_path",
+  "supports_templates",
+  "supports_media",
+  "supports_interactive"
+ ],
+ "fields": [
+  {
+   "fieldname": "channel_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Channel Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Provider",
+   "options": "Meta Cloud API",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "handler_module",
+   "fieldtype": "Data",
+   "label": "Handler Module",
+   "description": "Python module path that implements the channel adapter"
+  },
+  {
+   "fieldname": "webhook_path",
+   "fieldtype": "Data",
+   "label": "Webhook Path",
+   "description": "Relative URL path for inbound webhooks, e.g. /api/method/relay.webhooks.handler.receive"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_templates",
+   "fieldtype": "Check",
+   "label": "Supports Templates"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_media",
+   "fieldtype": "Check",
+   "label": "Supports Media"
+  },
+  {
+   "default": "1",
+   "fieldname": "supports_interactive",
+   "fieldtype": "Check",
+   "label": "Supports Interactive Messages"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-17 16:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Relay",
+ "name": "Relay Channel",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
