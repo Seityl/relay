@@ -1,7 +1,7 @@
 [project]
 name = "relay"
 authors = [
-    { name = "Pharmcare", email = "dev@pharmcare.kn"}
+    { name = "Jeriel Francis (trading as Seityl)", email = "jeriel@seityl.com"}
 ]
 description = "Multi-channel business messaging for Frappe"
 requires-python = ">=3.10"
