@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 
 import frappe
 
+from relay.integrations.registry import get_adapter
+
 MAX_RETRIES = 5
 RETRY_DELAYS = [60, 300, 900, 3600, 10800]  # seconds
 
@@ -24,10 +26,13 @@ def queue_outgoing_message(message_doc) -> str:
 			"message_type": message_doc.message_type,
 			"content_type": message_doc.content_type,
 			"message_body": message_doc.message_body,
+			"subject": message_doc.subject,
+			"html_body": message_doc.html_body,
 			"template": message_doc.template,
 			"template_parameters": message_doc.template_parameters,
 			"media_url": message_doc.media_url,
 			"interactive_payload": message_doc.interactive_payload,
+			"recipient_data": message_doc.recipient_data,
 			"reference_doctype": message_doc.reference_doctype,
 			"reference_name": message_doc.reference_name,
 			"attempts": 0,
@@ -76,7 +81,6 @@ def _process_single(queue_name: str) -> str:
 		queue_doc.error_log = ""
 		queue_doc.save(ignore_permissions=True)
 
-		_message = frappe.get_doc("Relay Message", {"thread": queue_doc.thread, "creation": queue_doc.creation})
 		# Update linked message status
 		linked = frappe.get_all(
 			"Relay Message",
@@ -116,13 +120,8 @@ def _dispatch(queue_doc) -> str:
 	account = frappe.get_doc("Relay Account", queue_doc.account)
 	channel = frappe.get_doc("Relay Channel", account.channel)
 
-	if channel.provider == "Meta Cloud API":
-		from relay.integrations.meta_cloud_api import MetaCloudAPIAdapter
-
-		adapter = MetaCloudAPIAdapter(account)
-		return adapter.send(queue_doc)
-
-	frappe.throw(f"Unsupported channel provider: {channel.provider}")
+	adapter = get_adapter(channel.provider, account)
+	return adapter.send(queue_doc)
 
 
 @frappe.whitelist()

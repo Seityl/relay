@@ -10,8 +10,14 @@ from relay.relay.doctype.relay_message.relay_message import send_message
 
 @frappe.whitelist()
 def send(
-	phone_number: str,
+	phone_number: str = "",
+	recipient_type: str = "",
+	recipient_value: str = "",
 	message_body: str = "",
+	subject: str = "",
+	html_body: str = "",
+	recipient_data: dict | None = None,
+	attachments: list | None = None,
 	template: str = "",
 	template_parameters: dict | None = None,
 	content_type: str = "text",
@@ -19,10 +25,22 @@ def send(
 	reference_doctype: str = "",
 	reference_name: str = "",
 ) -> dict:
-	"""Send a free-form or template message to a phone number."""
+	"""Send a free-form or template message to a recipient.
+
+	Backward-compatible: if only `phone_number` is provided, it is treated as a Phone recipient.
+	"""
+	if phone_number and not recipient_value:
+		recipient_type = "Phone"
+		recipient_value = phone_number
+
 	return send_message(
-		phone_number=phone_number,
+		recipient_type=recipient_type,
+		recipient_value=recipient_value,
 		message_body=message_body,
+		subject=subject,
+		html_body=html_body,
+		recipient_data=recipient_data,
+		attachments=attachments,
 		template=template,
 		template_parameters=template_parameters,
 		content_type=content_type,
@@ -62,16 +80,12 @@ def get_threads(
 	)
 
 	for thread in threads:
-		contact = frappe.db.get_value(
-			"Relay Contact",
-			thread.contact,
-			["display_name", "phone_number", "profile_name"],
-			as_dict=True,
+		contact = frappe.get_doc("Relay Contact", thread.contact)
+		primary = contact.get_primary_identifier()
+		thread["contact_name"] = contact.display_name or contact.profile_name or (
+			primary.identifier_value if primary else ""
 		)
-		thread["contact_name"] = (
-			contact.display_name or contact.profile_name or contact.phone_number
-		)
-		thread["phone_number"] = contact.phone_number
+		thread["phone_number"] = contact.get_identifier("Phone").identifier_value if contact.get_identifier("Phone") else None
 
 	return threads
 

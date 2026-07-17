@@ -18,7 +18,8 @@
   "event_frequency",
   "condition",
   "section_break_1",
-  "phone_field",
+  "recipient_type",
+  "recipient_field",
   "parameters",
   "section_break_2",
   "set_property_after_alert",
@@ -50,8 +51,7 @@
    "fieldname": "template",
    "fieldtype": "Link",
    "label": "Template",
-   "options": "Relay Template",
-   "reqd": 1
+   "options": "Relay Template"
   },
   {
    "fieldname": "column_break_1",
@@ -87,10 +87,16 @@
    "fieldtype": "Section Break"
   },
   {
-   "fieldname": "phone_field",
+   "fieldname": "recipient_type",
+   "fieldtype": "Select",
+   "label": "Recipient Type",
+   "options": "Phone\nEmail\nChat ID\nUsername"
+  },
+  {
+   "fieldname": "recipient_field",
    "fieldtype": "Data",
-   "label": "Phone Field",
-   "description": "Field on the reference DocType containing the phone number"
+   "label": "Recipient Field",
+   "description": "Field on the reference DocType containing the recipient identifier"
   },
   {
    "fieldname": "parameters",

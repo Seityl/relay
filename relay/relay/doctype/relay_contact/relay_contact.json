@@ -1,14 +1,13 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:phone_number",
+ "autoname": "hash",
  "creation": "2026-07-17 16:30:00.000000",
  "default_view": "List",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "phone_number",
   "display_name",
   "profile_name",
   "column_break_1",
@@ -17,17 +16,11 @@
   "last_message_at",
   "section_break_1",
   "account",
-  "is_blocked"
+  "is_blocked",
+  "section_break_2",
+  "identifiers"
  ],
  "fields": [
-  {
-   "fieldname": "phone_number",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Phone Number",
-   "reqd": 1,
-   "unique": 1
-  },
   {
    "fieldname": "display_name",
    "fieldtype": "Data",
@@ -77,6 +70,17 @@
    "fieldname": "is_blocked",
    "fieldtype": "Check",
    "label": "Is Blocked"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Identifiers"
+  },
+  {
+   "fieldname": "identifiers",
+   "fieldtype": "Table",
+   "label": "Identifiers",
+   "options": "Relay Contact Identifier"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -85,7 +89,7 @@
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Contact",
- "naming_rule": "By fieldname",
+ "naming_rule": "Random",
  "owner": "Administrator",
  "permissions": [
   {

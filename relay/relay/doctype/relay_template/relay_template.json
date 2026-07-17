@@ -12,6 +12,7 @@
   "actual_name",
   "status",
   "column_break_1",
+  "channel",
   "language",
   "language_code",
   "category",
@@ -24,7 +25,9 @@
   "header_type",
   "header_sample",
   "footer_text",
-  "buttons"
+  "buttons",
+  "section_break_3",
+  "channel_config"
  ],
  "fields": [
   {
@@ -55,6 +58,12 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "label": "Channel",
+   "options": "Relay Channel"
+  },
+  {
    "fieldname": "language",
    "fieldtype": "Link",
    "label": "Language",
@@ -63,15 +72,13 @@
   {
    "fieldname": "language_code",
    "fieldtype": "Data",
-   "label": "Language Code",
-   "reqd": 1
+   "label": "Language Code"
   },
   {
    "fieldname": "category",
    "fieldtype": "Select",
    "label": "Category",
-   "options": "MARKETING\nUTILITY\nAUTHENTICATION",
-   "reqd": 1
+   "options": "\nMARKETING\nUTILITY\nAUTHENTICATION"
   },
   {
    "fieldname": "provider_template_id",
@@ -126,6 +133,16 @@
    "fieldtype": "Table",
    "label": "Buttons",
    "options": "Relay Button"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break",
+   "label": "Channel Config"
+  },
+  {
+   "fieldname": "channel_config",
+   "fieldtype": "JSON",
+   "label": "Channel Config"
   }
  ],
  "index_web_pages_for_search": 1,
