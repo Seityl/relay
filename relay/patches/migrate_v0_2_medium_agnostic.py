@@ -9,10 +9,59 @@
 
 import frappe
 
+CHANNELS = [
+	{
+		"channel_name": "Meta Cloud API",
+		"provider": "Meta Cloud API",
+		"enabled": 1,
+		"adapter_class": "relay.integrations.meta_cloud_api.MetaCloudAPIAdapter",
+		"handler_module": "relay.integrations.meta_cloud_api",
+		"webhook_path": "/api/method/relay.webhooks.handler.receive",
+		"supports_templates": 1,
+		"supports_media": 1,
+		"supports_interactive": 1,
+	},
+	{
+		"channel_name": "Email",
+		"provider": "Email",
+		"enabled": 1,
+		"adapter_class": "relay.integrations.email_adapter.EmailAdapter",
+		"handler_module": "relay.integrations.email_adapter",
+		"webhook_path": "/api/method/relay.webhooks.handler.receive",
+		"supports_templates": 1,
+		"supports_media": 0,
+		"supports_interactive": 0,
+	},
+]
+
 
 def execute():
+	seed_channels()
 	migrate_contact_phone_numbers()
 	migrate_media_attachments()
+
+
+def seed_channels():
+	"""Seed default channels and ensure adapter_class is set on existing ones."""
+	for channel_data in CHANNELS:
+		if frappe.db.exists("Relay Channel", channel_data["channel_name"]):
+			frappe.db.set_value(
+				"Relay Channel",
+				channel_data["channel_name"],
+				{
+					"adapter_class": channel_data["adapter_class"],
+					"handler_module": channel_data["handler_module"],
+					"supports_templates": channel_data["supports_templates"],
+					"supports_media": channel_data["supports_media"],
+					"supports_interactive": channel_data["supports_interactive"],
+				},
+			)
+		else:
+			frappe.get_doc({"doctype": "Relay Channel", **channel_data}).insert(
+				ignore_permissions=True
+			)
+
+	frappe.db.commit()
 
 
 def migrate_contact_phone_numbers():
@@ -63,9 +112,12 @@ def migrate_media_attachments():
 	)
 
 	for media in media_rows:
+		if not media.message:
+			continue
+
 		exists = frappe.db.exists(
 			"Relay Message Attachment",
-			{"message": media.message, "file_url": media.file or media.file_url},
+			{"parent": media.message, "file_url": media.file or media.file_url},
 		)
 		if exists:
 			continue
@@ -80,7 +132,9 @@ def migrate_media_attachments():
 			frappe.get_doc(
 				{
 					"doctype": "Relay Message Attachment",
-					"message": media.message,
+					"parent": media.message,
+					"parenttype": "Relay Message",
+					"parentfield": "attachments",
 					"file_url": media.file or media.file_url,
 					"file_name": file_name,
 					"mime_type": media.mime_type,

@@ -7,6 +7,7 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
+ "istable": 1,
  "field_order": [
   "identifier_type",
   "identifier_value",
@@ -45,7 +46,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 16:30:00.000000",
+ "modified": "2026-07-17 19:19:56.951771",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Contact Identifier",
