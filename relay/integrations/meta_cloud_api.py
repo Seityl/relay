@@ -1,3 +1,6 @@
+# Copyright (c) 2026, Jeriel Francis (trading as Seityl) and contributors
+# For license information, please see license.txt
+
 """Adapter for Meta's Cloud messaging API.
 
 This module is intentionally provider-specific. A new adapter can be added for

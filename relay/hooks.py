@@ -1,3 +1,6 @@
+# Copyright (c) 2026, Jeriel Francis (trading as Seityl) and contributors
+# For license information, please see license.txt
+
 app_name = "relay"
 app_title = "Relay"
 app_publisher = "Pharmcare"
@@ -273,4 +276,3 @@ default_log_clearing_doctypes = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
