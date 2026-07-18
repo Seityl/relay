@@ -47,6 +47,9 @@ app_license = "mit"
 
 # include js in doctype views
 # doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	"Relay Thread": "public/js/relay_thread.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -270,6 +273,7 @@ scheduler_events = {
 default_log_clearing_doctypes = {
 	"Relay Webhook Log": 30,
 	"Relay Outbound Queue": 30,
+	"Relay Consent Log": 90,
 }
 
 # Translation

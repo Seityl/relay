@@ -105,6 +105,10 @@ class BaseChannelAdapter(ABC):
 		"""Optional provider handshake. Return None if not supported."""
 		return None
 
+	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
+		"""Validate an incoming webhook signature. Return True if valid."""
+		return False
+
 	@abstractmethod
 	def map_status(self, provider_status: str) -> str:
 		"""Map provider status string to a Relay Message status."""

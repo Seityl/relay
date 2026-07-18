@@ -1,0 +1,198 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:rule_name",
+ "creation": "2026-07-17 16:30:00.000000",
+ "default_view": "List",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_name",
+  "enabled",
+  "priority",
+  "column_break_1",
+  "channel",
+  "match_type",
+  "intent",
+  "section_break_1",
+  "keywords",
+  "regex_pattern",
+  "condition",
+  "section_break_2",
+  "response_type",
+  "template",
+  "response_subject",
+  "response_body",
+  "section_break_3",
+  "assign_to",
+  "set_thread_status",
+  "add_tags",
+  "business_hours_only",
+  "fallback_when_no_match"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "50",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Priority",
+   "description": "Lower number = evaluated first"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "channel",
+   "fieldtype": "Link",
+   "label": "Channel",
+   "options": "Relay Channel"
+  },
+  {
+   "default": "Keyword",
+   "fieldname": "match_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Match Type",
+   "options": "Keyword\nRegex\nIntent\nAlways",
+   "reqd": 1
+  },
+  {
+   "fieldname": "intent",
+   "fieldtype": "Select",
+   "label": "Intent",
+   "options": "\nQuestion\nRefill\nPrescription\nDelivery\nStop\nStart\nHelp\nGreeting\nComplaint\nFallback\nOther"
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break",
+   "label": "Match Criteria"
+  },
+  {
+   "fieldname": "keywords",
+   "fieldtype": "Small Text",
+   "label": "Keywords",
+   "description": "Comma-separated keywords for Keyword matching"
+  },
+  {
+   "fieldname": "regex_pattern",
+   "fieldtype": "Data",
+   "label": "Regex Pattern"
+  },
+  {
+   "fieldname": "condition",
+   "fieldtype": "Code",
+   "label": "Condition",
+   "options": "PythonExpression",
+   "description": "Python expression with access to message, thread, contact"
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Response"
+  },
+  {
+   "default": "Freeform",
+   "fieldname": "response_type",
+   "fieldtype": "Select",
+   "label": "Response Type",
+   "options": "None\nTemplate\nFreeform",
+   "reqd": 1
+  },
+  {
+   "fieldname": "template",
+   "fieldtype": "Link",
+   "label": "Template",
+   "options": "Relay Template"
+  },
+  {
+   "fieldname": "response_subject",
+   "fieldtype": "Data",
+   "label": "Response Subject",
+   "description": "Used for Email responses"
+  },
+  {
+   "fieldname": "response_body",
+   "fieldtype": "Text Editor",
+   "label": "Response Body"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break",
+   "label": "Actions"
+  },
+  {
+   "fieldname": "assign_to",
+   "fieldtype": "Link",
+   "label": "Assign To",
+   "options": "User"
+  },
+  {
+   "fieldname": "set_thread_status",
+   "fieldtype": "Select",
+   "label": "Set Thread Status",
+   "options": "\nOpen\nBot Handling\nAwaiting Agent\nEscalated\nResolved\nClosed"
+  },
+  {
+   "fieldname": "add_tags",
+   "fieldtype": "Small Text",
+   "label": "Add Tags",
+   "description": "Comma-separated tags"
+  },
+  {
+   "default": "0",
+   "fieldname": "business_hours_only",
+   "fieldtype": "Check",
+   "label": "Business Hours Only"
+  },
+  {
+   "default": "0",
+   "fieldname": "fallback_when_no_match",
+   "fieldtype": "Check",
+   "label": "Fallback When No Match"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-17 16:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "Relay",
+ "name": "Relay Auto Reply Rule",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "priority",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

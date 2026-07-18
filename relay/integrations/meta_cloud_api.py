@@ -3,6 +3,8 @@
 
 """Adapter for Meta's Cloud messaging API."""
 
+import hashlib
+import hmac
 import json
 from typing import Any
 
@@ -188,6 +190,24 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 			frappe.throw("Invalid verify token")
 
 		return Response(challenge, status=200)
+
+	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
+		"""Validate Meta X-Hub-Signature-256 webhook signature."""
+		secret = self.account.get_app_secret()
+		if not secret:
+			# If no secret configured, allow through but log warning
+			frappe.log_error(
+				title="Relay Meta Webhook: No App Secret",
+				message="Webhook signature cannot be validated because app_secret is empty.",
+			)
+			return True
+
+		expected = "sha256=" + hmac.new(
+			secret.encode("utf-8"),
+			payload_bytes,
+			hashlib.sha256,
+		).hexdigest()
+		return hmac.compare_digest(expected, signature)
 
 	def parse_inbound_webhook(
 		self, payload: dict, account_name: str | None = None

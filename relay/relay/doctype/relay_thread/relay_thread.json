@@ -12,8 +12,10 @@
   "account",
   "column_break_1",
   "status",
+  "assigned_to",
   "last_message_at",
   "unread_count",
+  "tags",
   "section_break_1",
   "subject",
   "reference_doctype",
@@ -46,7 +48,14 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Open\nClosed\nArchived"
+   "options": "Open\nBot Handling\nAwaiting Agent\nEscalated\nResolved\nClosed\nArchived"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Assigned To",
+   "options": "User"
   },
   {
    "fieldname": "last_message_at",
@@ -59,6 +68,11 @@
    "fieldname": "unread_count",
    "fieldtype": "Int",
    "label": "Unread Count"
+  },
+  {
+   "fieldname": "tags",
+   "fieldtype": "Small Text",
+   "label": "Tags"
   },
   {
    "fieldname": "section_break_1",

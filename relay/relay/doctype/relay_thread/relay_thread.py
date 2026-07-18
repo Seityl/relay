@@ -55,3 +55,38 @@ def get_default_account_for_contact() -> str | None:
 	from relay.relay.doctype.relay_account.relay_account import get_default_account
 
 	return get_default_account("outgoing")
+
+
+@frappe.whitelist()
+def send_reply(
+	thread: str,
+	message_body: str = "",
+	template: str = "",
+	template_parameters: dict | None = None,
+	content_type: str = "text",
+) -> dict:
+	"""Send a reply from a Relay Thread to its contact's primary identifier."""
+	from relay.relay.doctype.relay_message.relay_message import send_message
+
+	thread_doc = frappe.get_doc("Relay Thread", thread)
+	contact = frappe.get_doc("Relay Contact", thread_doc.contact)
+	primary = contact.get_primary_identifier()
+
+	if not primary:
+		frappe.throw(_("Contact has no primary identifier"))
+
+	account = thread_doc.account or get_default_account_for_contact()
+	if not account:
+		frappe.throw(_("No outgoing account configured"))
+
+	return send_message(
+		recipient_type=primary.identifier_type,
+		recipient_value=primary.identifier_value,
+		message_body=message_body,
+		template=template,
+		template_parameters=template_parameters,
+		content_type=content_type,
+		account=account,
+		reference_doctype="Relay Thread",
+		reference_name=thread_doc.name,
+	)

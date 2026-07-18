@@ -6,6 +6,7 @@
 import frappe
 from frappe.model.document import Document
 
+from relay.compliance.consent import check_can_send
 from relay.relay.doctype.relay_contact.relay_contact import (
 	RelayContact,
 )
@@ -67,6 +68,8 @@ def send_message(
 		frappe.throw("Recipient type and value are required")
 
 	contact = RelayContact.get_or_create(recipient_type, recipient_value)
+	check_can_send(contact, raise_error=True)
+
 	if not account:
 		from relay.relay.doctype.relay_account.relay_account import (
 			get_default_account,
