@@ -17,6 +17,7 @@
   "message_type",
   "content_type",
   "message_id",
+  "email_message_id",
   "conversation_id",
   "sent_at",
   "delivered_at",
@@ -104,6 +105,12 @@
    "fieldname": "message_id",
    "fieldtype": "Data",
    "label": "Provider Message ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "email_message_id",
+   "fieldtype": "Data",
+   "label": "Email Message ID",
    "read_only": 1
   },
   {

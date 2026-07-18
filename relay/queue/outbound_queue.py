@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 
 import frappe
 
+from relay.compliance.consent import check_can_send
+from relay.hooks_registry import run_hooks
 from relay.integrations.registry import get_adapter
 
 MAX_RETRIES = 5
@@ -69,6 +71,14 @@ def _process_single(queue_name: str) -> str:
 	if queue_doc.status == "Cancelled":
 		return "skipped"
 
+	contact_doc = frappe.get_doc("Relay Contact", queue_doc.contact)
+	if not check_can_send(contact_doc):
+		queue_doc.status = "Cancelled"
+		queue_doc.error_log = "Contact has opted out of messaging"
+		queue_doc.save(ignore_permissions=True)
+		frappe.db.commit()
+		return "skipped"
+
 	queue_doc.status = "Pending"
 	queue_doc.last_attempt_at = frappe.utils.now()
 	queue_doc.attempts += 1
@@ -101,6 +111,13 @@ def _process_single(queue_name: str) -> str:
 			message_doc.save(ignore_permissions=True)
 
 		frappe.db.commit()
+
+		try:
+			linked_doc = frappe.get_doc("Relay Message", linked[0].name) if linked else None
+			run_hooks("outbound_sent", linked_doc, queue_doc)
+		except Exception:
+			frappe.log_error(title="Relay Outbound Sent Hook Failed")
+
 		return "sent"
 	except Exception as e:
 		queue_doc.error_log = frappe.get_traceback()

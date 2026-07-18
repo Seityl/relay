@@ -20,6 +20,10 @@ class RelayAccount(Document):
 		"""Return decrypted access token."""
 		return self.get_password("access_token")
 
+	def get_app_secret(self) -> str:
+		"""Return decrypted app secret for webhook validation."""
+		return self.get_password("app_secret")
+
 	def get_api_base_url(self) -> str:
 		"""Return provider API base URL."""
 		return f"{self.api_url.rstrip('/')}/{self.api_version}"

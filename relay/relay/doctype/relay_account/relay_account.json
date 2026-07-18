@@ -19,6 +19,7 @@
   "app_id",
   "credentials_section",
   "access_token",
+  "app_secret",
   "credentials",
   "default_sender_address",
   "api_url",
@@ -98,6 +99,13 @@
    "length": 500
   },
   {
+   "fieldname": "app_secret",
+   "fieldtype": "Password",
+   "label": "App Secret",
+   "description": "Used to validate incoming webhook signatures",
+   "length": 500
+  },
+  {
    "fieldname": "credentials",
    "fieldtype": "JSON",
    "label": "Credentials",
@@ -152,7 +160,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 16:30:00.000000",
+ "modified": "2026-07-18 17:02:57.932017",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Account",

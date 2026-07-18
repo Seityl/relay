@@ -16,6 +16,7 @@
   "processed_at",
   "section_break_1",
   "payload",
+  "headers",
   "error_log"
  ],
  "fields": [
@@ -64,6 +65,12 @@
    "options": "JSON"
   },
   {
+   "fieldname": "headers",
+   "fieldtype": "Code",
+   "label": "Headers",
+   "options": "JSON"
+  },
+  {
    "fieldname": "error_log",
    "fieldtype": "Text",
    "label": "Error Log"
@@ -71,7 +78,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 16:30:00.000000",
+ "modified": "2026-07-18 17:02:57.932017",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Webhook Log",

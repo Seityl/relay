@@ -3,6 +3,8 @@
 
 """Adapter for sending email via Frappe's built-in email utilities."""
 
+import socket
+
 import frappe
 
 from relay.integrations.base_adapter import (
@@ -26,6 +28,9 @@ class EmailAdapter(BaseChannelAdapter):
 		message = queue_doc.html_body or queue_doc.message_body or ""
 		sender = self.account.default_sender_address or None
 
+		email_message_id = self._generate_message_id(queue_doc)
+		in_reply_to = self._get_in_reply_to(queue_doc.thread)
+
 		frappe.sendmail(
 			recipients=recipients,
 			subject=subject,
@@ -33,10 +38,52 @@ class EmailAdapter(BaseChannelAdapter):
 			sender=sender,
 			reference_doctype=queue_doc.reference_doctype,
 			reference_name=queue_doc.reference_name,
+			message_id=email_message_id,
+			in_reply_to=in_reply_to,
 		)
 
-		# Frappe does not return a provider message id, so generate a stable one.
-		return frappe.generate_hash(length=16)
+		self._store_email_message_id(queue_doc, email_message_id)
+		return email_message_id
+
+	def _generate_message_id(self, queue_doc) -> str:
+		"""Generate a stable RFC-2822 style Message-ID for this queue entry."""
+		host = frappe.local.site or socket.gethostname()
+		return f"<relay-{queue_doc.name}@{host}>"
+
+	def _get_in_reply_to(self, thread: str) -> str:
+		"""Return the Message-ID of the most recent inbound email in the thread."""
+		if not thread:
+			return ""
+		inbound = frappe.get_all(
+			"Relay Message",
+			filters={
+				"thread": thread,
+				"direction": "Incoming",
+				"email_message_id": ["is", "set"],
+			},
+			fields=["email_message_id"],
+			order_by="creation desc",
+			limit=1,
+		)
+		return inbound[0].email_message_id if inbound else ""
+
+	def _store_email_message_id(self, queue_doc, email_message_id: str):
+		"""Persist the generated Message-ID on the linked Relay Message."""
+		if not queue_doc.thread:
+			return
+		linked = frappe.get_all(
+			"Relay Message",
+			filters={
+				"thread": queue_doc.thread,
+				"direction": "Outgoing",
+				"status": "Pending",
+			},
+			fields=["name"],
+			order_by="creation desc",
+			limit=1,
+		)
+		if linked:
+			frappe.db.set_value("Relay Message", linked[0].name, "email_message_id", email_message_id)
 
 	def _resolve_recipients(self, queue_doc) -> list[str]:
 		"""Resolve email recipients from queue_doc data."""
