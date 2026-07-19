@@ -135,7 +135,9 @@ CHANNELS = [
 
 
 def after_install():
-	"""Seed default channels and auto-reply rules if they do not exist."""
+	"""Seed default channels, roles and auto-reply rules if they do not exist."""
+	create_roles()
+
 	for channel_data in CHANNELS:
 		if not frappe.db.exists("Relay Channel", channel_data["channel_name"]):
 			frappe.get_doc({"doctype": "Relay Channel", **channel_data}).insert(
@@ -144,6 +146,15 @@ def after_install():
 
 	seed_default_auto_reply_rules()
 	frappe.db.commit()
+
+
+def create_roles():
+	"""Create Relay roles if they do not exist."""
+	for role_name in ("Relay User", "Relay Manager"):
+		if not frappe.db.exists("Role", role_name):
+			frappe.get_doc({"doctype": "Role", "role_name": role_name, "desk_access": 1}).insert(
+				ignore_permissions=True
+			)
 
 
 def seed_default_auto_reply_rules():
