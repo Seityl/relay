@@ -149,11 +149,22 @@
    "type": "Link"
   }
  ],
- "modified": "2026-07-18 17:15:00.000000",
+ "modified": "2026-07-18 17:35:00.000000",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay",
  "owner": "Administrator",
  "standard": 1,
- "title": "Relay"
+ "title": "Relay",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Relay User"
+  },
+  {
+   "role": "Relay Manager"
+  }
+ ]
 }
