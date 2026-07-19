@@ -64,6 +64,7 @@ def send_reply(
 	template: str = "",
 	template_parameters: dict | None = None,
 	content_type: str = "text",
+	attachments: list | None = None,
 ) -> dict:
 	"""Send a reply from a Relay Thread to its contact's primary identifier."""
 	from relay.relay.doctype.relay_message.relay_message import send_message
@@ -89,4 +90,5 @@ def send_reply(
 		account=account,
 		reference_doctype="Relay Thread",
 		reference_name=thread_doc.name,
+		attachments=attachments,
 	)

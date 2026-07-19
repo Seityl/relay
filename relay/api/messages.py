@@ -54,6 +54,8 @@ def send(
 def get_threads(
 	search: str = "",
 	status: str = "",
+	unread_only: bool = False,
+	prescription_only: bool = False,
 	limit: int = 50,
 	offset: int = 0,
 ) -> list[dict]:
@@ -61,6 +63,10 @@ def get_threads(
 	filters = {}
 	if status:
 		filters["status"] = status
+	if unread_only:
+		filters["unread_count"] = [">", 0]
+	if prescription_only:
+		filters["reference_doctype"] = "RxFlow Prescription"
 
 	threads = frappe.get_all(
 		"Relay Thread",
@@ -73,12 +79,16 @@ def get_threads(
 			"last_message_at",
 			"unread_count",
 			"subject",
+			"reference_doctype",
+			"reference_name",
 		],
 		limit=limit,
 		start=offset,
 		order_by="last_message_at desc",
 	)
 
+	results = []
+	search_lower = (search or "").lower()
 	for thread in threads:
 		contact = frappe.get_doc("Relay Contact", thread.contact)
 		primary = contact.get_primary_identifier()
@@ -86,8 +96,25 @@ def get_threads(
 			primary.identifier_value if primary else ""
 		)
 		thread["phone_number"] = contact.get_identifier("Phone").identifier_value if contact.get_identifier("Phone") else None
+		thread["email"] = contact.get_identifier("Email").identifier_value if contact.get_identifier("Email") else None
+		thread["last_message"] = _last_message_preview(thread.name)
 
-	return threads
+		if search_lower:
+			searchable = (
+				(thread["contact_name"] or "")
+				+ " "
+				+ (thread["phone_number"] or "")
+				+ " "
+				+ (thread["email"] or "")
+				+ " "
+				+ (thread["subject"] or "")
+			).lower()
+			if search_lower not in searchable:
+				continue
+
+		results.append(thread)
+
+	return results
 
 
 @frappe.whitelist()
@@ -96,12 +123,12 @@ def get_messages(
 	limit: int = 50,
 	before: str = "",
 ) -> list[dict]:
-	"""Return messages in a thread."""
+	"""Return messages in a thread, including attachments."""
 	filters = {"thread": thread}
 	if before:
 		filters["creation"] = ["<", before]
 
-	return frappe.get_all(
+	messages = frappe.get_all(
 		"Relay Message",
 		filters=filters,
 		fields=[
@@ -110,16 +137,37 @@ def get_messages(
 			"status",
 			"content_type",
 			"message_body",
+			"html_body",
 			"message_id",
 			"media",
+			"media_url",
 			"sent_at",
 			"delivered_at",
 			"read_at",
 			"creation",
+			"reference_doctype",
+			"reference_name",
 		],
 		limit=limit,
 		order_by="creation desc",
 	)
+
+	for message in messages:
+		message["attachments"] = [
+			{
+				"file_url": a.file_url,
+				"file_name": a.file_name,
+				"mime_type": a.mime_type,
+				"caption": a.caption,
+			}
+			for a in frappe.get_all(
+				"Relay Message Attachment",
+				filters={"parent": message.name},
+				fields=["file_url", "file_name", "mime_type", "caption"],
+			)
+		]
+
+	return messages
 
 
 @frappe.whitelist()
@@ -155,3 +203,34 @@ def get_templates(
 			"status",
 		],
 	)
+
+
+@frappe.whitelist()
+def get_template_parameters(template: str) -> list[dict]:
+	"""Return parameters for a template so the UI can render input fields."""
+	if not frappe.db.exists("Relay Template", template):
+		return []
+
+	return frappe.get_all(
+		"Relay Template Parameter",
+		filters={"parent": template},
+		fields=["parameter_name", "parameter_index", "sample_value"],
+		order_by="parameter_index asc",
+	)
+
+
+def _last_message_preview(thread: str) -> str:
+	"""Return a short preview of the most recent message in a thread."""
+	message = frappe.get_all(
+		"Relay Message",
+		filters={"thread": thread},
+		fields=["message_body", "content_type"],
+		limit=1,
+		order_by="creation desc",
+	)
+	if not message:
+		return ""
+	body = message[0].message_body or ""
+	if message[0].content_type in ("image", "document", "audio", "video"):
+		return f"[{message[0].content_type.capitalize()}] {body}"
+	return body[:80]

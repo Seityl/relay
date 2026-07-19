@@ -50,9 +50,9 @@ class TestEmailAdapter(unittest.TestCase):
 		self.assertEqual(result["recipients"], ["user@example.com"])
 
 	@patch("relay.integrations.email_adapter.frappe.sendmail")
-	@patch("relay.integrations.email_adapter.frappe.generate_hash")
-	def test_send_resolves_recipients_from_recipient_data(self, mock_hash, mock_sendmail):
-		mock_hash.return_value = "generated-id"
+	@patch.object(EmailAdapter, "_generate_message_id")
+	def test_send_resolves_recipients_from_recipient_data(self, mock_message_id, mock_sendmail):
+		mock_message_id.return_value = "generated-id"
 		queue_doc = MagicMock()
 		queue_doc.recipient_data = {"to": "a@example.com, b@example.com", "cc": ["c@example.com"]}
 		queue_doc.contact = None
@@ -61,6 +61,7 @@ class TestEmailAdapter(unittest.TestCase):
 		queue_doc.message_body = "Hi"
 		queue_doc.reference_doctype = ""
 		queue_doc.reference_name = ""
+		queue_doc.thread = None
 
 		message_id = self.adapter.send(queue_doc)
 
