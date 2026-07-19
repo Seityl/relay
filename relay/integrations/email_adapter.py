@@ -52,7 +52,7 @@ class EmailAdapter(BaseChannelAdapter):
 
 	def _get_in_reply_to(self, thread: str) -> str:
 		"""Return the Message-ID of the most recent inbound email in the thread."""
-		if not thread:
+		if not thread or not isinstance(thread, str):
 			return ""
 		inbound = frappe.get_all(
 			"Relay Message",
@@ -69,7 +69,7 @@ class EmailAdapter(BaseChannelAdapter):
 
 	def _store_email_message_id(self, queue_doc, email_message_id: str):
 		"""Persist the generated Message-ID on the linked Relay Message."""
-		if not queue_doc.thread:
+		if not queue_doc.thread or not isinstance(queue_doc.thread, str):
 			return
 		linked = frappe.get_all(
 			"Relay Message",
