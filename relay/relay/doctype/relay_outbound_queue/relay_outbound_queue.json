@@ -49,127 +49,151 @@
    "fieldtype": "Link",
    "label": "Account",
    "options": "Relay Account",
-   "reqd": 1
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "contact",
    "fieldtype": "Link",
    "label": "Contact",
    "options": "Relay Contact",
-   "reqd": 1
+   "reqd": 1,
+   "in_list_view": 1
   },
   {
    "fieldname": "thread",
    "fieldtype": "Link",
    "label": "Thread",
-   "options": "Relay Thread"
+   "options": "Relay Thread",
+   "in_list_view": 1
   },
   {
    "fieldname": "column_break_1",
-   "fieldtype": "Column Break"
+   "fieldtype": "Column Break",
+   "in_list_view": 0
   },
   {
    "fieldname": "message_type",
    "fieldtype": "Select",
    "label": "Message Type",
-   "options": "Freeform\nTemplate\nInteractive"
+   "options": "Freeform\nTemplate\nInteractive",
+   "in_list_view": 0
   },
   {
    "fieldname": "content_type",
    "fieldtype": "Select",
    "label": "Content Type",
-   "options": "text\nimage\ndocument\naudio\nvideo\ninteractive"
+   "options": "text\nimage\ndocument\naudio\nvideo\ninteractive",
+   "in_list_view": 0
   },
   {
    "fieldname": "scheduled_at",
    "fieldtype": "Datetime",
-   "label": "Scheduled At"
+   "label": "Scheduled At",
+   "in_list_view": 0
   },
   {
    "fieldname": "section_break_1",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "in_list_view": 0
   },
   {
    "fieldname": "subject",
    "fieldtype": "Data",
-   "label": "Subject"
+   "label": "Subject",
+   "in_list_view": 0
   },
   {
    "fieldname": "message_body",
    "fieldtype": "Text",
-   "label": "Message Body"
+   "label": "Message Body",
+   "in_list_view": 0
   },
   {
    "fieldname": "html_body",
    "fieldtype": "Text Editor",
-   "label": "HTML Body"
+   "label": "HTML Body",
+   "in_list_view": 0
   },
   {
    "fieldname": "template",
    "fieldtype": "Link",
    "label": "Template",
-   "options": "Relay Template"
+   "options": "Relay Template",
+   "in_list_view": 0
   },
   {
    "fieldname": "template_parameters",
    "fieldtype": "JSON",
-   "label": "Template Parameters"
+   "label": "Template Parameters",
+   "in_list_view": 0
   },
   {
    "fieldname": "column_break_2",
-   "fieldtype": "Column Break"
+   "fieldtype": "Column Break",
+   "in_list_view": 0
   },
   {
    "fieldname": "media_url",
    "fieldtype": "Data",
-   "label": "Media URL"
+   "label": "Media URL",
+   "in_list_view": 0
   },
   {
    "fieldname": "interactive_payload",
    "fieldtype": "JSON",
-   "label": "Interactive Payload"
+   "label": "Interactive Payload",
+   "in_list_view": 0
   },
   {
    "fieldname": "recipient_data",
    "fieldtype": "JSON",
-   "label": "Recipient Data"
+   "label": "Recipient Data",
+   "in_list_view": 0
   },
   {
    "fieldname": "section_break_2",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "in_list_view": 0
   },
   {
    "default": "0",
    "fieldname": "attempts",
    "fieldtype": "Int",
-   "label": "Attempts"
+   "label": "Attempts",
+   "in_list_view": 1
   },
   {
    "fieldname": "last_attempt_at",
    "fieldtype": "Datetime",
-   "label": "Last Attempt At"
+   "label": "Last Attempt At",
+   "in_list_view": 0
   },
   {
    "fieldname": "next_attempt_at",
    "fieldtype": "Datetime",
-   "label": "Next Attempt At"
+   "label": "Next Attempt At",
+   "in_list_view": 0
   },
   {
    "fieldname": "error_log",
    "fieldtype": "Text",
-   "label": "Error Log"
+   "label": "Error Log",
+   "in_list_view": 0
   },
   {
    "fieldname": "reference_doctype",
    "fieldtype": "Link",
    "label": "Reference DocType",
-   "options": "DocType"
+   "options": "DocType",
+   "in_list_view": 0
   },
   {
    "fieldname": "reference_name",
    "fieldtype": "Dynamic Link",
    "label": "Reference Name",
-   "options": "reference_doctype"
+   "options": "reference_doctype",
+   "in_list_view": 0
   }
  ],
  "index_web_pages_for_search": 1,
@@ -192,10 +216,61 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 0,
+   "role": "Relay User",
+   "share": 0,
+   "submit": 0,
+   "cancel": 0,
+   "amend": 0,
+   "write": 0
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Relay Manager",
+   "share": 1,
+   "submit": 0,
+   "cancel": 0,
+   "amend": 0,
+   "write": 1
   }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
+ "states": [
+  {
+   "title": "Queued",
+   "color": "orange"
+  },
+  {
+   "title": "Pending",
+   "color": "blue"
+  },
+  {
+   "title": "Sent",
+   "color": "green"
+  },
+  {
+   "title": "Failed",
+   "color": "red"
+  },
+  {
+   "title": "Cancelled",
+   "color": "gray"
+  }
+ ],
  "track_changes": 1
 }
