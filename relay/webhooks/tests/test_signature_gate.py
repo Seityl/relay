@@ -35,7 +35,15 @@ from frappe.tests import IntegrationTestCase
 from relay.webhooks.handler import _handle_post, _signature_from
 
 AUTH_TOKEN = "gate-test-auth-token"
-URL = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=Twilio Gate Test"
+ACCOUNT = "Twilio-Gate-Test"
+CHANNEL = "Twilio Gate Test Channel"
+ORIGIN = "https://relay.test"
+PATH = "/api/method/relay.webhooks.handler.receive"
+QUERY = f"account={ACCOUNT}"
+#: What Twilio signs: the callback URL as configured, which is what
+#: `_signed_url` rebuilds from the site origin. The URL the request arrives
+#: with is deliberately different below, because here it always is.
+URL = f"{ORIGIN}{PATH}?{QUERY}"
 
 
 class _Headers(dict):
@@ -57,7 +65,11 @@ class _Request:
 	def __init__(self, form, headers):
 		self._form = form
 		self.headers = _Headers(headers)
-		self.url = URL
+		# As the proxy delivers it: host rewritten to the backend, scheme
+		# reported as http. Nothing like the URL Twilio signed.
+		self.url = f"http://10.6.0.35{PATH}?{QUERY}"
+		self.path = PATH
+		self.query_string = QUERY.encode()
 		self.data = b""
 
 	@property
@@ -66,7 +78,7 @@ class _Request:
 
 	@property
 	def args(self):
-		return _Form({"account": "Twilio Gate Test"})
+		return _Form({"account": ACCOUNT})
 
 
 def _sign(url: str, params: dict) -> str:
@@ -81,11 +93,11 @@ class TestSignatureGate(IntegrationTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 
-		if not frappe.db.exists("Relay Channel", "Twilio Gate Test Channel"):
+		if not frappe.db.exists("Relay Channel", CHANNEL):
 			frappe.get_doc(
 				{
 					"doctype": "Relay Channel",
-					"channel_name": "Twilio Gate Test Channel",
+					"channel_name": CHANNEL,
 					"provider": "Twilio",
 					"enabled": 1,
 				}
@@ -94,9 +106,9 @@ class TestSignatureGate(IntegrationTestCase):
 		account = frappe.get_doc(
 			{
 				"doctype": "Relay Account",
-				"account_name": "Twilio Gate Test",
+				"account_name": ACCOUNT,
 				"status": "Active",
-				"channel": "Twilio Gate Test Channel",
+				"channel": CHANNEL,
 				"identifier_type": "Phone",
 				"identifier_value": "15550002222",
 				"credentials": json.dumps({"account_sid": "AC00000000000000000000000000000000"}),
@@ -121,7 +133,11 @@ class TestSignatureGate(IntegrationTestCase):
 		commit is what makes that possible.
 		"""
 		request = _Request(params, headers)
-		with patch("frappe.request", request), patch("frappe.db.commit"):
+		with (
+			patch("frappe.request", request),
+			patch("frappe.db.commit"),
+			patch("frappe.utils.get_url", return_value=ORIGIN),
+		):
 			frappe.local.form_dict = frappe._dict(params)
 			try:
 				return _handle_post()
