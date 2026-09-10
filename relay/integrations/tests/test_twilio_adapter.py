@@ -21,6 +21,8 @@ from unittest.mock import patch
 from relay.integrations.twilio_adapter import STATUS_MAP, TwilioAdapter
 
 AUTH_TOKEN = "test-auth-token"
+ORIGIN = "https://rxflow-dev.jollys.dm"
+PATH = "/api/method/relay.webhooks.handler.receive"
 
 APP_ROOT = pathlib.Path(__file__).resolve().parents[2]
 MESSAGE_JSON = APP_ROOT / "relay" / "doctype" / "relay_message" / "relay_message.json"
@@ -37,11 +39,41 @@ class _Account:
 		return AUTH_TOKEN
 
 
+#: A real inbound WhatsApp message, captured from the Relay Webhook Log on
+#: this deployment, with every identifier replaced. The *shape* is what two
+#: hand-written fixtures got wrong and a live message found: `SmsStatus` is
+#: present on inbound, and Frappe merges `account`/`cmd` into form_dict.
+#:
+#: The account SID, phone numbers and profile name are placeholders. This is
+#: a public repository; the first version of this fixture carried the real
+#: ones and GitHub push protection refused the push, which was the correct
+#: call -- and it would not have flagged the phone number.
+REAL_INBOUND = {
+	"AccountSid": "AC00000000000000000000000000000000",
+	"ApiVersion": "2010-04-01",
+	"Body": "Hello",
+	"ChannelMetadata": '{"type":"whatsapp","data":{"context":{"ProfileName":"Test Profile","WaId":"15550001111"}}}',
+	"From": "whatsapp:+15550001111",
+	"MessageSid": "SM00000000000000000000000000000000",
+	"MessageType": "text",
+	"NumMedia": "0",
+	"NumSegments": "1",
+	"ProfileName": "Test Profile",
+	"SmsMessageSid": "SM00000000000000000000000000000000",
+	"SmsSid": "SM00000000000000000000000000000000",
+	"SmsStatus": "received",
+	"To": "whatsapp:+15550002222",
+	"WaId": "15550001111",
+}
+
+
 class _Request:
-	def __init__(self, url, form, headers=None):
+	def __init__(self, url, form, headers=None, path=None, query_string=b""):
 		self.url = url
 		self._form = form
 		self.headers = headers or {}
+		self.path = path or "/api/method/relay.webhooks.handler.receive"
+		self.query_string = query_string
 
 	@property
 	def form(self):
@@ -115,6 +147,72 @@ class TestTwilioAdapter(unittest.TestCase):
 		self.assertEqual(normalized.status_events[0].provider_message_id, "SM123")
 		self.assertEqual(normalized.status_events[0].status, "Delivered")
 
+	def test_a_real_inbound_message_is_not_mistaken_for_a_delivery_receipt(self):
+		"""The bug a live message found and the hand-written fixtures missed.
+
+		Twilio sends `SmsStatus=received` on inbound. Branching on the mere
+		presence of `SmsStatus` reads a customer's message as a receipt for
+		some other message and drops it -- no error, no Relay Message, the
+		text simply gone.
+		"""
+		normalized = self.adapter.parse_inbound_webhook(REAL_INBOUND)
+
+		self.assertEqual(
+			normalized.status_events,
+			[],
+			"an inbound message carrying SmsStatus=received was classified as "
+			"a delivery receipt and discarded",
+		)
+		self.assertEqual(len(normalized.messages), 1)
+
+		message = normalized.messages[0]
+		self.assertEqual(message.body, "Hello")
+		self.assertEqual(message.from_identifier.identifier_value, "15550001111")
+		self.assertEqual(message.from_identifier.display_name, "Test Profile")
+		self.assertEqual(message.provider_message_id, "SM00000000000000000000000000000000")
+
+	def test_a_delivery_receipt_is_still_told_apart_by_MessageStatus(self):
+		"""The control for the fix above.
+
+		Loosening the discriminator must not go so far that real receipts
+		are read as inbound messages.
+		"""
+		receipt = {"MessageSid": "SM1", "MessageStatus": "delivered", "SmsStatus": "delivered"}
+		normalized = self.adapter.parse_inbound_webhook(receipt)
+
+		self.assertEqual(normalized.messages, [])
+		self.assertEqual(len(normalized.status_events), 1)
+
+	def test_the_signed_url_survives_a_proxy_that_rewrites_host_and_scheme(self):
+		"""Captured from the proxy in front of this deployment.
+
+		    Host                 10.6.0.35
+		    X-Forwarded-Proto    http
+
+		so `request.url` is `http://10.6.0.35/...` while Twilio signed
+		`https://rxflow-dev.jollys.dm/...`. Repairing the received URL cannot
+		work -- both the scheme and the host are wrong. The URL Twilio signed
+		is the one we configured, so it is rebuilt from the site origin.
+		"""
+		public = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=Twilio-WhatsApp"
+		as_received = _Request(
+			url="http://10.6.0.35/api/method/relay.webhooks.handler.receive?account=Twilio-WhatsApp",
+			form=REAL_INBOUND,
+			headers={"Host": "10.6.0.35", "X-Forwarded-Proto": "http"},
+			path="/api/method/relay.webhooks.handler.receive",
+			query_string=b"account=Twilio-WhatsApp",
+		)
+
+		with patch("frappe.utils.get_url", return_value="https://rxflow-dev.jollys.dm"):
+			self.assertEqual(self.adapter._signed_url(as_received), public)
+
+			with patch("frappe.request", as_received):
+				self.assertTrue(
+					self.adapter.validate_webhook_signature(b"", self._sign(public, REAL_INBOUND)),
+					"a signature Twilio computed over the public https URL was "
+					"rejected because the proxy rewrote Host and scheme",
+				)
+
 	def test_a_status_event_arrives_already_translated(self):
 		"""`webhooks/handler.py` never calls map_status itself.
 
@@ -187,13 +285,26 @@ class TestTwilioAdapter(unittest.TestCase):
 			hmac.new(AUTH_TOKEN.encode(), payload.encode(), hashlib.sha1).digest()
 		).decode()
 
+	def _received(self, params):
+		"""A request as it actually arrives: proxied, host and scheme rewritten."""
+		return _Request(
+			url="http://10.6.0.35" + PATH,
+			form=params,
+			headers={"Host": "10.6.0.35", "X-Forwarded-Proto": "http"},
+			path=PATH,
+			query_string=b"account=Twilio-WhatsApp",
+		)
+
 	def test_a_signature_over_the_url_and_sorted_params_is_accepted(self):
 		"""The documented Twilio algorithm, reproduced independently here."""
-		url = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=T"
 		params = {"MessageSid": "SM1", "Body": "hi", "From": "whatsapp:+1767"}
+		signed = f"{ORIGIN}{PATH}?account=Twilio-WhatsApp"
 
-		with patch("frappe.request", _Request(url, params)):
-			self.assertTrue(self.adapter.validate_webhook_signature(b"", self._sign(url, params)))
+		with patch("frappe.utils.get_url", return_value=ORIGIN):
+			with patch("frappe.request", self._received(params)):
+				self.assertTrue(
+					self.adapter.validate_webhook_signature(b"", self._sign(signed, params))
+				)
 
 	def test_a_signature_computed_over_a_different_url_is_rejected(self):
 		"""The URL is part of what is signed, which is the point.
@@ -201,19 +312,20 @@ class TestTwilioAdapter(unittest.TestCase):
 		Meta signs the body alone; if this adapter did the same, a payload
 		captured from one endpoint would validate against another.
 		"""
-		url = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=T"
 		params = {"MessageSid": "SM1", "Body": "hi"}
 		signature = self._sign("https://evil.example/receive", params)
 
-		with patch("frappe.request", _Request(url, params)):
-			self.assertFalse(self.adapter.validate_webhook_signature(b"", signature))
+		with patch("frappe.utils.get_url", return_value=ORIGIN):
+			with patch("frappe.request", self._received(params)):
+				self.assertFalse(self.adapter.validate_webhook_signature(b"", signature))
 
 	def test_a_tampered_parameter_is_rejected(self):
-		url = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive"
-		signature = self._sign(url, {"MessageSid": "SM1", "Body": "hi"})
+		signed = f"{ORIGIN}{PATH}?account=Twilio-WhatsApp"
+		signature = self._sign(signed, {"MessageSid": "SM1", "Body": "hi"})
 
-		with patch("frappe.request", _Request(url, {"MessageSid": "SM1", "Body": "tampered"})):
-			self.assertFalse(self.adapter.validate_webhook_signature(b"", signature))
+		with patch("frappe.utils.get_url", return_value=ORIGIN):
+			with patch("frappe.request", self._received({"MessageSid": "SM1", "Body": "tampered"})):
+				self.assertFalse(self.adapter.validate_webhook_signature(b"", signature))
 
 	def test_the_adapter_names_the_header_its_signature_arrives_in(self):
 		"""The shared handler hardcoded Meta's header.
@@ -230,26 +342,6 @@ class TestTwilioAdapter(unittest.TestCase):
 		configuration in which an unsigned webhook should be accepted.
 		"""
 		self.assertTrue(self.adapter.requires_valid_signature())
-
-	def test_a_signature_still_matches_behind_a_tls_terminating_proxy(self):
-		"""Twilio signs the public https URL, not the one gunicorn sees.
-
-		gunicorn serves plain HTTP behind a proxy here, so `request.url`
-		reports `http://`. Without honouring X-Forwarded-Proto every
-		signature fails to match, and the failure looks like a bad token
-		rather than a scheme mismatch.
-		"""
-		public = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=T"
-		as_received = public.replace("https://", "http://", 1)
-		params = {"MessageSid": "SM1", "Body": "hi"}
-
-		request = _Request(as_received, params, headers={"X-Forwarded-Proto": "https"})
-		with patch("frappe.request", request):
-			self.assertTrue(
-				self.adapter.validate_webhook_signature(b"", self._sign(public, params)),
-				"a signature Twilio computed over the https URL was rejected because "
-				"gunicorn reported the request as http",
-			)
 
 	def test_a_missing_signature_is_rejected_rather_than_waved_through(self):
 		"""Deliberately unlike the Meta adapter.

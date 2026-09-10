@@ -242,11 +242,30 @@ class TwilioAdapter(BaseChannelAdapter):
 
 	# --- inbound ---------------------------------------------------------
 
+	def _is_status_callback(self, payload: dict) -> bool:
+		"""Tell a delivery receipt from an inbound message.
+
+		Both arrive at the same URL, so this is the only thing separating
+		them, and getting it wrong loses real messages rather than erroring.
+
+		`SmsStatus` alone is not the discriminator: Twilio sends
+		`SmsStatus=received` on **inbound** messages. Branching on its mere
+		presence reads a customer's message as a delivery receipt for some
+		other message, and drops it. Confirmed against a real inbound payload
+		on this deployment, which carried `SmsStatus='received'` alongside
+		`Body='Hello'`.
+
+		A delivery receipt carries `MessageStatus`. Inbound never does.
+		"""
+		if payload.get("MessageStatus"):
+			return True
+		status = (payload.get("SmsStatus") or "").lower()
+		return bool(status) and status != "received"
+
 	def parse_inbound_webhook(self, payload: dict, account_name: str | None = None) -> InboundPayload:
 		normalized = InboundPayload(account_name=account_name or "")
 
-		# Twilio uses one endpoint for both, distinguished by this key.
-		if payload.get("MessageStatus") or payload.get("SmsStatus"):
+		if self._is_status_callback(payload):
 			event = self._parse_status(payload)
 			if event:
 				normalized.status_events.append(event)
@@ -383,20 +402,30 @@ class TwilioAdapter(BaseChannelAdapter):
 		return bool(self.account.get_access_token())
 
 	def _signed_url(self, request) -> str:
-		"""The URL Twilio signed, which is not always the one we received.
+		"""The URL Twilio signed, which is not the one we receive.
 
-		Twilio signs the public `https://` URL it was configured with.
-		gunicorn here listens on plain HTTP behind a TLS-terminating proxy,
-		so `request.url` reports `http://` unless the WSGI environ has been
-		fixed up -- and every signature would then fail to match for a reason
-		that looks nothing like a proxy problem. `X-Forwarded-Proto` is what
-		the proxy tells us the client actually used.
+		Twilio signs the public URL it was configured with. What arrives here
+		bears no resemblance to it -- captured from a real inbound message on
+		this deployment:
+
+		    Host                 10.6.0.35
+		    X-Forwarded-Proto    http
+
+		so `request.url` is `http://10.6.0.35/api/method/...` while Twilio
+		signed `https://rxflow-dev.jollys.dm/api/method/...`. Both the scheme
+		and the host are wrong, and the resulting mismatch presents as a bad
+		Auth Token rather than as a proxy problem.
+
+		Repairing the received URL is the wrong shape -- there is no reliable
+		way to undo an arbitrary proxy. The URL Twilio signed is the one we
+		configured, so this rebuilds it from the site's canonical origin and
+		keeps only the path and query string, which the proxy does preserve.
+		`get_url()` reads `host_name` from site config; if that is unset or
+		wrong, signature validation is where it will be noticed.
 		"""
-		url = request.url
-		forwarded = request.headers.get("X-Forwarded-Proto", "")
-		if forwarded and url.startswith("http://") and forwarded.lower() == "https":
-			url = "https://" + url[len("http://") :]
-		return url
+		origin = frappe.utils.get_url().rstrip("/")
+		query = request.query_string.decode() if request.query_string else ""
+		return f"{origin}{request.path}" + (f"?{query}" if query else "")
 
 	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
 		"""Twilio signs the URL plus the POST parameters sorted by name.
