@@ -46,10 +46,17 @@ def queue_outgoing_message(message_doc) -> str:
 
 def process_queue(batch_size: int = 50) -> dict:
 	"""Process queued outbound messages. Called by scheduler."""
+	# `Failed` is terminal and must not appear here (#2). A retry is not a
+	# Failed row: _process_single reschedules by setting `Queued` with a
+	# future next_attempt_at, and only marks `Failed` once MAX_RETRIES is
+	# spent. Selecting `Failed` too meant an exhausted row was re-attempted
+	# on every tick for ever -- five rows on the dev site passed 19,000
+	# attempts each. `retry_failed()` is the supported way back, and it sets
+	# the row to `Queued`.
 	queued = frappe.get_all(
 		"Relay Outbound Queue",
 		filters={
-			"status": ["in", ["Queued", "Failed"]],
+			"status": "Queued",
 			"next_attempt_at": ["<=", frappe.utils.now()],
 		},
 		fields=["name"],
