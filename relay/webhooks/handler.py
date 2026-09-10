@@ -60,7 +60,6 @@ def _handle_post() -> Response:
             return Response("Invalid JSON", status=400)
 
     headers = dict(frappe.request.headers) if frappe.request else {}
-    signature = headers.get("X-Hub-Signature-256") or headers.get("x-hub-signature-256", "")
 
     _log = frappe.get_doc(
         {
@@ -82,12 +81,16 @@ def _handle_post() -> Response:
             channel = frappe.get_doc("Relay Channel", account.channel)
             adapter = get_adapter(channel.provider, account)
 
-            if signature and not adapter.validate_webhook_signature(payload_bytes, signature):
-                _log.status = "Failed"
-                _log.error_log = "Invalid webhook signature"
-                _log.save(ignore_permissions=True)
-                frappe.db.commit()
-                return Response("Invalid signature", status=401)
+            # The header name belongs to the provider, not to this handler.
+            signature = _signature_from(headers, adapter.signature_header())
+
+            if signature:
+                if not adapter.validate_webhook_signature(payload_bytes, signature):
+                    return _reject(_log, "Invalid webhook signature")
+            elif adapter.requires_valid_signature():
+                # Without this branch, omitting the header is enough to skip
+                # verification altogether on an allow_guest endpoint.
+                return _reject(_log, "Missing webhook signature")
 
             normalized = adapter.parse_inbound_webhook(payload, account_name=account_name)
         else:
@@ -109,6 +112,30 @@ def _handle_post() -> Response:
             frappe.db.commit()
 
     return Response("OK", status=200)
+
+
+def _signature_from(headers: dict, name: str) -> str:
+    """Read a signature header without caring how the proxy cased it.
+
+    HTTP header names are case-insensitive, and what reaches here depends on
+    the proxy in front of gunicorn. Looking up one exact spelling is how a
+    present signature reads as absent -- which, given the check is skipped
+    when no signature is found, silently downgrades to no verification.
+    """
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return ""
+
+
+def _reject(_log, reason: str) -> Response:
+    """Record why a webhook was refused, and say so in the response."""
+    _log.status = "Failed"
+    _log.error_log = reason
+    _log.save(ignore_permissions=True)
+    frappe.db.commit()
+    return Response(reason, status=401)
 
 
 def _safe_headers(headers: dict) -> dict:

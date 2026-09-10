@@ -369,14 +369,44 @@ class TwilioAdapter(BaseChannelAdapter):
 	def get_default_recipient_type(self) -> str:
 		return "Phone"
 
-	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
-		"""Twilio signs the URL plus the sorted POST parameters.
+	def signature_header(self) -> str:
+		return "X-Twilio-Signature"
 
-		`payload_bytes` alone is not enough to reproduce it, so the request
-		is read from `frappe.request`. If there is no request in scope there
-		is nothing to validate against, and this returns False rather than
-		waving the payload through -- unlike the Meta adapter, which returns
-		True when no secret is configured.
+	def requires_valid_signature(self) -> bool:
+		"""An unsigned request is refused whenever we could have checked one.
+
+		The Auth Token is both the API credential and the signing key, so if
+		sending works at all, verification is possible -- there is no
+		configuration in which accepting an unsigned webhook is the right
+		behaviour for this channel.
+		"""
+		return bool(self.account.get_access_token())
+
+	def _signed_url(self, request) -> str:
+		"""The URL Twilio signed, which is not always the one we received.
+
+		Twilio signs the public `https://` URL it was configured with.
+		gunicorn here listens on plain HTTP behind a TLS-terminating proxy,
+		so `request.url` reports `http://` unless the WSGI environ has been
+		fixed up -- and every signature would then fail to match for a reason
+		that looks nothing like a proxy problem. `X-Forwarded-Proto` is what
+		the proxy tells us the client actually used.
+		"""
+		url = request.url
+		forwarded = request.headers.get("X-Forwarded-Proto", "")
+		if forwarded and url.startswith("http://") and forwarded.lower() == "https":
+			url = "https://" + url[len("http://") :]
+		return url
+
+	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
+		"""Twilio signs the URL plus the POST parameters sorted by name.
+
+		`payload_bytes` alone cannot reproduce that, so the request is read
+		from `frappe.request`. Note `request.form` rather than
+		`frappe.local.form_dict`: Frappe merges query-string arguments into
+		form_dict, and Twilio signed only its own POST body, so validating
+		against the merged dict would fail as soon as the callback URL grew
+		a `?account=` parameter -- which it always has.
 		"""
 		token = self.account.get_access_token()
 		if not token or not signature:
@@ -386,9 +416,8 @@ class TwilioAdapter(BaseChannelAdapter):
 		if request is None:
 			return False
 
-		url = request.url
 		params = request.form.to_dict() if request.form else {}
-		payload = url + "".join(f"{k}{params[k]}" for k in sorted(params))
+		payload = self._signed_url(request) + "".join(f"{k}{params[k]}" for k in sorted(params))
 
 		expected = base64.b64encode(
 			hmac.new(token.encode("utf-8"), payload.encode("utf-8"), hashlib.sha1).digest()

@@ -38,9 +38,10 @@ class _Account:
 
 
 class _Request:
-	def __init__(self, url, form):
+	def __init__(self, url, form, headers=None):
 		self.url = url
 		self._form = form
+		self.headers = headers or {}
 
 	@property
 	def form(self):
@@ -213,6 +214,42 @@ class TestTwilioAdapter(unittest.TestCase):
 
 		with patch("frappe.request", _Request(url, {"MessageSid": "SM1", "Body": "tampered"})):
 			self.assertFalse(self.adapter.validate_webhook_signature(b"", signature))
+
+	def test_the_adapter_names_the_header_its_signature_arrives_in(self):
+		"""The shared handler hardcoded Meta's header.
+
+		Any other provider's signature was therefore never read -- and since
+		the handler skips verification when it finds none, never checked.
+		"""
+		self.assertEqual(self.adapter.signature_header(), "X-Twilio-Signature")
+
+	def test_an_unsigned_request_is_refused_for_this_channel(self):
+		"""The Auth Token is both the API credential and the signing key.
+
+		If sending works at all, verification is possible, so there is no
+		configuration in which an unsigned webhook should be accepted.
+		"""
+		self.assertTrue(self.adapter.requires_valid_signature())
+
+	def test_a_signature_still_matches_behind_a_tls_terminating_proxy(self):
+		"""Twilio signs the public https URL, not the one gunicorn sees.
+
+		gunicorn serves plain HTTP behind a proxy here, so `request.url`
+		reports `http://`. Without honouring X-Forwarded-Proto every
+		signature fails to match, and the failure looks like a bad token
+		rather than a scheme mismatch.
+		"""
+		public = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=T"
+		as_received = public.replace("https://", "http://", 1)
+		params = {"MessageSid": "SM1", "Body": "hi"}
+
+		request = _Request(as_received, params, headers={"X-Forwarded-Proto": "https"})
+		with patch("frappe.request", request):
+			self.assertTrue(
+				self.adapter.validate_webhook_signature(b"", self._sign(public, params)),
+				"a signature Twilio computed over the https URL was rejected because "
+				"gunicorn reported the request as http",
+			)
 
 	def test_a_missing_signature_is_rejected_rather_than_waved_through(self):
 		"""Deliberately unlike the Meta adapter.
