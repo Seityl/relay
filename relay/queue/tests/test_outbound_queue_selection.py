@@ -154,12 +154,29 @@ class TestOutboundQueueSelection(IntegrationTestCase):
 	# --- #2: an exhausted message is left alone --------------------------
 
 	def test_an_exhausted_message_is_not_retried_again(self):
-		"""`Failed` is terminal. The selector must not re-offer it."""
-		row = self._queue_row(status="Failed", attempts=MAX_RETRIES)
+		"""`Failed` is terminal. The selector must not re-offer it.
 
+		The live row is here to keep the assertion honest. `assertNotIn`
+		against an empty list passes for free, and run on its own this test
+		selects nothing -- so without a row that *should* come back, a
+		selector that had stopped returning anything at all would read as a
+		pass. Asserting the live one is present first means the absence of
+		the exhausted one is a real observation.
+		"""
+		exhausted = self._queue_row(status="Failed", attempts=MAX_RETRIES)
+		live = self._queue_row(attempts=MAX_RETRIES - 1)
+
+		selected = self._selected()
+
+		self.assertIn(
+			live.name,
+			selected,
+			"the selector returned nothing it should have, so the assertion "
+			"below would have passed without observing anything",
+		)
 		self.assertNotIn(
-			row.name,
-			self._selected(),
+			exhausted.name,
+			selected,
 			f"a message that already failed {MAX_RETRIES} times was selected "
 			"again; this is the loop that passed 19,000 attempts, and against "
 			"a metered provider every pass is a billed call",
