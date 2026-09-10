@@ -131,6 +131,20 @@ CHANNELS = [
 		"supports_media": 0,
 		"supports_interactive": 0,
 	},
+	{
+		"channel_name": "Twilio",
+		"provider": "Twilio",
+		"enabled": 1,
+		"adapter_class": "relay.integrations.twilio_adapter.TwilioAdapter",
+		"handler_module": "relay.integrations.twilio_adapter",
+		"webhook_path": "/api/method/relay.webhooks.handler.receive",
+		"supports_templates": 1,
+		"supports_media": 1,
+		# Twilio's WhatsApp interactive messages go through the Content API
+		# as templates rather than the free-form interactive payload the
+		# Meta adapter builds, so the adapter does not claim this.
+		"supports_interactive": 0,
+	},
 ]
 
 
