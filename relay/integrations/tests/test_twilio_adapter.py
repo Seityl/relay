@@ -327,6 +327,39 @@ class TestTwilioAdapter(unittest.TestCase):
 			with patch("frappe.request", self._received({"MessageSid": "SM1", "Body": "tampered"})):
 				self.assertFalse(self.adapter.validate_webhook_signature(b"", signature))
 
+	def test_the_webhook_answer_carries_no_message(self):
+		"""Twilio reads the webhook response as TwiML and acts on it.
+
+		Relay's generic `OK` was delivered to a real customer as a WhatsApp
+		message reading "OK" -- once per inbound message, billable, from a
+		handler that thought it was returning an HTTP status line. Observed
+		on this deployment as SMbe309ea9399f98451523ef245c8104c7.
+
+		Relay sends its replies through the outbound queue, so this response
+		must never carry content.
+		"""
+		ack = self.adapter.webhook_ack()
+
+		self.assertEqual(ack.status_code, 200)
+		self.assertEqual(ack.content_type, "text/xml")
+
+		body = ack.get_data(as_text=True)
+		self.assertIn("<Response></Response>", body)
+		self.assertNotIn("<Message", body, "the acknowledgement would send a message")
+		self.assertNotIn("OK", body, "the literal OK is what reached a customer's phone")
+
+	def test_the_default_acknowledgement_is_unchanged_for_other_providers(self):
+		"""Meta ignores the response body and was built against `OK`.
+
+		The fix belongs to the adapter that needs it, not to the shared
+		default, so this pins that nothing changed for anyone else.
+		"""
+		from relay.integrations.base_adapter import BaseChannelAdapter
+
+		ack = BaseChannelAdapter.webhook_ack(self.adapter)
+		self.assertEqual(ack.get_data(as_text=True), "OK")
+		self.assertEqual(ack.status_code, 200)
+
 	def test_the_adapter_names_the_header_its_signature_arrives_in(self):
 		"""The shared handler hardcoded Meta's header.
 

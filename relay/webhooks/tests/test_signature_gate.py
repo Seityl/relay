@@ -189,6 +189,18 @@ class TestSignatureGate(IntegrationTestCase):
 			"a correctly signed webhook was refused, so the channel accepts nothing",
 		)
 
+		# The handler must answer with the adapter's acknowledgement, not its
+		# own. Twilio reads this body as TwiML: a plain "OK" here is delivered
+		# to the customer as a WhatsApp message saying "OK".
+		body = response.get_data(as_text=True)
+		self.assertIn("<Response></Response>", body)
+		self.assertNotEqual(
+			body,
+			"OK",
+			"the handler answered with its generic OK instead of the adapter's "
+			"acknowledgement, which Twilio sends to the customer",
+		)
+
 	def test_the_signature_is_read_from_the_providers_own_header(self):
 		"""Meta's header must not satisfy a Twilio account.
 

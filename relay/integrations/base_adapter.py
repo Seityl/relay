@@ -105,6 +105,18 @@ class BaseChannelAdapter(ABC):
 		"""Optional provider handshake. Return None if not supported."""
 		return None
 
+	def webhook_ack(self) -> Response:
+		"""What to answer a provider's webhook with.
+
+		Not every provider ignores the response body. Meta does, so this
+		default -- a plain `OK` -- was invisible for as long as Meta was the
+		only channel. Twilio does not: it read the literal string `OK` as a
+		message to send and delivered it to the customer, once per inbound
+		message. An adapter whose provider ascribes meaning to the body must
+		say so here.
+		"""
+		return Response("OK", status=200)
+
 	def signature_header(self) -> str:
 		"""The request header carrying this provider's signature.
 

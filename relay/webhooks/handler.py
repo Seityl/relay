@@ -72,6 +72,7 @@ def _handle_post() -> Response:
     )
     _log.insert(ignore_permissions=True)
 
+    ack = None
     try:
         account_name = _resolve_account_from_payload(payload)
         _log.account = account_name
@@ -93,6 +94,11 @@ def _handle_post() -> Response:
                 return _reject(_log, "Missing webhook signature")
 
             normalized = adapter.parse_inbound_webhook(payload, account_name=account_name)
+            # The provider decides what an acknowledgement looks like. Twilio
+            # reads this response as TwiML and will deliver whatever it says
+            # to the customer; a generic "OK" reached a real phone as a
+            # WhatsApp message, once per inbound.
+            ack = adapter.webhook_ack()
         else:
             normalized = _empty_payload()
 
@@ -111,7 +117,8 @@ def _handle_post() -> Response:
             _log.save(ignore_permissions=True)
             frappe.db.commit()
 
-    return Response("OK", status=200)
+    # Falls back only when no account resolved, i.e. no adapter to ask.
+    return ack or Response("OK", status=200)
 
 
 def _signature_from(headers: dict, name: str) -> str:

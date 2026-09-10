@@ -41,6 +41,7 @@ import json
 
 import frappe
 import requests
+from werkzeug.wrappers import Response
 
 from relay.integrations.base_adapter import (
 	Attachment,
@@ -387,6 +388,24 @@ class TwilioAdapter(BaseChannelAdapter):
 
 	def get_default_recipient_type(self) -> str:
 		return "Phone"
+
+	def webhook_ack(self) -> Response:
+		"""Empty TwiML: acknowledged, send nothing.
+
+		Twilio reads the webhook response as TwiML and acts on it. Relay's
+		generic `OK` was delivered to the customer as a WhatsApp message
+		reading "OK", once per inbound message -- observed on this
+		deployment as SMbe309ea9399f98451523ef245c8104c7, and billable.
+
+		An empty `<Response/>` is the documented way to say "handled, reply
+		with nothing". Relay sends its own replies through the outbound
+		queue, so the webhook response must never carry content.
+		"""
+		return Response(
+			'<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+			status=200,
+			content_type="text/xml",
+		)
 
 	def signature_header(self) -> str:
 		return "X-Twilio-Signature"
