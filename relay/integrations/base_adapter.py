@@ -105,6 +105,43 @@ class BaseChannelAdapter(ABC):
 		"""Optional provider handshake. Return None if not supported."""
 		return None
 
+	def webhook_ack(self) -> Response:
+		"""What to answer a provider's webhook with.
+
+		Not every provider ignores the response body. Meta does, so this
+		default -- a plain `OK` -- was invisible for as long as Meta was the
+		only channel. Twilio does not: it read the literal string `OK` as a
+		message to send and delivered it to the customer, once per inbound
+		message. An adapter whose provider ascribes meaning to the body must
+		say so here.
+		"""
+		return Response("OK", status=200)
+
+	def signature_header(self) -> str:
+		"""The request header carrying this provider's signature.
+
+		The webhook handler is shared by every provider, so it cannot know
+		the header name -- Meta sends `X-Hub-Signature-256`, Twilio sends
+		`X-Twilio-Signature`. It was hardcoded to Meta's, which meant any
+		other provider's signature was never read and, because the check is
+		skipped when no signature is found, never verified either.
+		"""
+		return "X-Hub-Signature-256"
+
+	def requires_valid_signature(self) -> bool:
+		"""Whether an unsigned request must be rejected.
+
+		The handler only validates when a signature is present, so returning
+		False means an attacker can skip verification by omitting the header
+		on a guest-callable endpoint. The default is False because that is
+		the behaviour the Meta adapter was built and tested against -- it
+		returns True from `validate_webhook_signature` when no app secret is
+		configured, and `test_missing_secret_allows_through` pins that. An
+		adapter that can always verify should return True and close the hole
+		for its own channel.
+		"""
+		return False
+
 	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
 		"""Validate an incoming webhook signature. Return True if valid."""
 		return False
