@@ -254,6 +254,20 @@ def _execute_rule(rule, message_doc, thread_doc, contact_doc) -> IntentResult:
 
     # Apply thread-level actions (status, assignment, tags)
     if thread_doc:
+        # The caller's copy is stale, and not occasionally: the same message
+        # insert that triggers classification also re-saves this thread,
+        # through a separate object, in RelayMessage.after_insert. So every
+        # inbound message arrived here holding an out-of-date thread and the
+        # save below raised TimestampMismatchError -- swallowed by the
+        # handler, which is why it went unnoticed from July until #9.
+        #
+        # Reloading discards nothing: no caller mutates the thread between
+        # loading it and calling classify_message. The premise is pinned by
+        # test_the_thread_the_caller_holds_is_stale_once_the_message_is_inserted,
+        # so if after_insert ever stops re-saving, that test fails and this
+        # reload can be removed deliberately rather than left as cargo.
+        thread_doc.reload()
+
         if rule.set_thread_status:
             thread_doc.status = rule.set_thread_status
         if rule.assign_to:
