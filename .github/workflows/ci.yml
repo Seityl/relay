@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - version-16
+  push:
+    branches:
+      - version-16
+
+concurrency:
+  group: ci-relay-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Server tests on relay.test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    services:
+      redis-cache:
+        image: redis:alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:alpine
+        ports:
+          - 11000:6379
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=5s --health-timeout=2s --health-retries=10
+
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install MariaDB client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mariadb-client
+
+      - name: Init bench
+        run: |
+          pip install frappe-bench
+          bench init --skip-redis-config-generation --skip-assets --frappe-branch version-16 \
+            --python "$(which python)" ~/frappe-bench
+
+      - name: Get app
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench get-app --skip-assets relay "$GITHUB_WORKSPACE"
+          bench setup requirements --dev
+
+      - name: Create relay.test
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench new-site relay.test --db-root-password root --admin-password admin --install-app relay
+          bench --site relay.test set-config allow_tests 1
+        env:
+          CI: "Yes"
+
+      - name: Run tests (known-failures ratchet)
+        working-directory: /home/runner/frappe-bench
+        run: apps/relay/scripts/run-tests.sh --site relay.test --app relay
+
+      - name: Keep the full logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relay-test-logs
+          path: /home/runner/frappe-bench/apps/relay/logs/tests/

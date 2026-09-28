@@ -16,8 +16,8 @@ from relay.relay.doctype.relay_message.relay_message import send_message
 EVENT_MAP = {
 	"after_insert": "After Insert",
 	"on_update": "On Update",
-	"after_submit": "After Submit",
-	"after_cancel": "After Cancel",
+	"on_submit": "After Submit",  # Frappe v16 fires on_submit; there is no after_submit
+	"on_cancel": "After Cancel",
 	"after_delete": "After Delete",
 }
 

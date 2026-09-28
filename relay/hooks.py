@@ -148,8 +148,8 @@ doc_events = {
 	"*": {
 		"after_insert": "relay.scheduler.notification_engine.run_doc_event_notification",
 		"on_update": "relay.scheduler.notification_engine.run_doc_event_notification",
-		"after_submit": "relay.scheduler.notification_engine.run_doc_event_notification",
-		"after_cancel": "relay.scheduler.notification_engine.run_doc_event_notification",
+		"on_submit": "relay.scheduler.notification_engine.run_doc_event_notification",
+		"on_cancel": "relay.scheduler.notification_engine.run_doc_event_notification",
 		"after_delete": "relay.scheduler.notification_engine.run_doc_event_notification",
 	}
 }
@@ -229,7 +229,7 @@ scheduler_events = {
 # Request Events
 # ----------------
 # before_request = ["relay.utils.before_request"]
-# after_request = ["relay.utils.after_request"]
+after_request = ["relay.version.add_version_header"]
 
 # Job Events
 # ----------

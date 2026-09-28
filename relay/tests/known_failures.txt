@@ -1,0 +1,2 @@
+# Tests failing on version-16, each with its cause and the issue that fixes it.
+# Checked by relay/tests/known_failures.py. Entries only ever leave this file.
