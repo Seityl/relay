@@ -428,7 +428,13 @@ class TestRuleExecution(IntegrationTestCase):
 	def test_a_template_auto_reply_also_lands_on_the_conversations_thread(self):
 		"""#22 PIN: a Template auto-reply is pinned to the conversation's
 		thread and account exactly like a freeform one — both branches pass
-		account and thread, so both must be guarded by the same tests."""
+		account and thread, so both must be guarded by the same tests.
+
+		The rule CLOSES the thread: against a live thread the pin is
+		indistinguishable from the lookup finding the thread anyway, so the
+		pin is only observable — and only testable — on a terminal thread,
+		which is where the Stop goodbye lives.
+		"""
 		template = frappe.get_doc(
 			{
 				"doctype": "Relay Template",
@@ -447,6 +453,7 @@ class TestRuleExecution(IntegrationTestCase):
 				"intent": "Refill",
 				"response_type": "Template",
 				"template": template.name,
+				"set_thread_status": "Closed",
 			}
 		).insert(ignore_permissions=True)
 
@@ -455,6 +462,13 @@ class TestRuleExecution(IntegrationTestCase):
 			result = classify_message(message, held, self.contact)
 
 		self.assertTrue(result.matched, "the template rule did not match a refill")
+		# The fixture must actually be in the state the pin targets: the
+		# rule closed the thread before the reply was sent.
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", message.thread, "status"),
+			"Closed",
+			"the rule did not close the thread, so this test does not reach the pin",
+		)
 		reply = frappe.get_all(
 			"Relay Message",
 			filters={"contact": self.contact.name, "direction": "Outgoing"},
