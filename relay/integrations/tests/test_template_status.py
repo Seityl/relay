@@ -415,9 +415,11 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 	def test_a_flagged_meta_template_stays_approved(self):
 		template = self._template(META_CHANNEL, "Approved", "1689556908129833")
 
-		self._meta_webhook(1689556908129833, "FLAGGED")
+		log_error = self._meta_webhook(1689556908129833, "FLAGGED")
 
 		self.assertEqual(self._status(template), "Approved")
+		# A deliberate "no change" is not an error.
+		log_error.assert_not_called()
 
 	def test_a_meta_event_relay_does_not_know_leaves_the_template_unchanged_and_says_so(self):
 		template = self._template(META_CHANNEL, "Approved", "1689556908129834")
