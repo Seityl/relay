@@ -34,9 +34,11 @@ class RelayThread(Document):
 		"Bot Handling" or "Awaiting Agent" is the same conversation and keeps
 		receiving its messages. If several live threads exist (data that
 		split under the old lookup), the newest one continues. A thread with
-		a NULL status is out of contract -- every writer goes through the ORM,
-		whose default is Open -- and such a row is replaced rather than
-		continued.
+		a NULL status is out of contract -- every writer goes through the
+		ORM, whose default is Open -- and the ORM's "not in" filter treats
+		NULL as live (IFNULL against the option list), so such a row is
+		continued rather than replaced; that keeps a corrupt row findable
+		instead of hiding it behind a fresh thread.
 		"""
 		if not account:
 			contact_doc = frappe.get_doc("Relay Contact", contact)
