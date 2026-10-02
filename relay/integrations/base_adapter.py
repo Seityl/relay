@@ -71,7 +71,8 @@ class TemplateStatusEvent:
 	"""Provider-agnostic template approval status event."""
 
 	provider_template_id: str = ""
-	status: str = ""
+	status: str = ""  # a Relay Template status, mapped by the adapter; "" = leave it as it is
+	provider_status: str = ""  # what the provider said, for the record
 	raw_payload: dict = field(default_factory=dict)
 
 
@@ -164,6 +165,17 @@ class BaseChannelAdapter(ABC):
 	def validate_template(self, template_doc) -> list[str]:
 		"""Return a list of validation errors for a template. Empty if valid."""
 		return []
+
+	def fetch_template_status(self, template_doc) -> TemplateStatusEvent | None:
+		"""Ask the provider for one template's approval status.
+
+		None means this provider tells relay by webhook instead (Meta's
+		`message_template_status_update`), so there is nothing to ask. An
+		adapter whose provider has no such webhook -- Twilio has three
+		webhook slots and none of them is this (#6) -- must override it, or
+		a template on that channel never leaves Pending.
+		"""
+		return None
 
 	def format_template(
 		self, template_doc, parameters: dict, recipient: NormalizedRecipient
