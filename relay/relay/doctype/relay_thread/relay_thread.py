@@ -72,15 +72,45 @@ class RelayThread(Document):
 
 		`direction` is the message's Relay Message.direction, so it is spelled
 		as that Select's options are: "Incoming" or "Outgoing".
+
+		One atomic UPDATE (Seityl/relay#22): two overlapping inbounds both
+		reach this row, and a document save with optimistic locking turned
+		the second one into a TimestampMismatchError that failed the whole
+		webhook and made the provider retry. A targeted UPDATE has no
+		optimistic check, increments the count in SQL so concurrent writes
+		each count, and only ever moves the timestamps forward -- GREATEST
+		keeps the later stamp when a commit lands after a later inbound's
+		commit. COALESCE is required because MariaDB's GREATEST returns NULL
+		when any argument is NULL, which would leave a fresh thread's first
+		inbound unstamped. The stamps take the message's own creation, never
+		now(), so they agree with the message rows they summarise.
 		"""
-		self.last_message_at = last_message_at
-		if direction == "Incoming":
-			self.unread_count = (self.unread_count or 0) + 1
-			# The 24-hour session window (#7) is anchored on when the
-			# contact last wrote, not on this thread's last message of
-			# any direction.
-			self.last_inbound_at = last_message_at
-		self.save(ignore_permissions=True)
+		incoming = direction == "Incoming"
+		sets = [
+			"last_message_at = GREATEST(COALESCE(last_message_at, %(ts)s), %(ts)s)",
+			"unread_count = unread_count + %(inc)s",
+		]
+		if incoming:
+			sets.append(
+				"last_inbound_at = GREATEST(COALESCE(last_inbound_at, %(ts)s), %(ts)s)"
+			)
+		# Same convention as db.set_value: modified moves, modified_by is the
+		# session user (Guest on a webhook). Whole-document saves keep their
+		# optimistic locking against this write, as they always had.
+		sets.append("modified = %(now)s")
+		sets.append("modified_by = %(user)s")
+
+		frappe.db.sql(
+			f"UPDATE `tabRelay Thread` SET {', '.join(sets)} WHERE name = %(name)s",
+			{
+				"name": self.name,
+				"ts": last_message_at,
+				"inc": 1 if incoming else 0,
+				"now": frappe.utils.now(),
+				"user": frappe.session.user,
+			},
+		)
+		frappe.clear_document_cache("Relay Thread", self.name)
 
 
 def get_default_account_for_contact() -> str | None:

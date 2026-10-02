@@ -262,3 +262,107 @@ class TestRelayThread(IntegrationTestCase):
 			"the resolved (newest) thread was continued; a finished "
 			"conversation must not swallow the live one",
 		)
+
+	# --- #22: two overlapping inbounds on one thread -----------------------
+
+	def _other_account(self):
+		return frappe.get_doc(
+			{
+				"doctype": "Relay Account",
+				"account_name": "Unread Count Test Account 2",
+				"status": "Active",
+				"channel": "Email",
+			}
+		).insert(ignore_permissions=True)
+
+	def test_two_inbounds_arriving_together_both_move_the_thread_and_count_once_each(self):
+		"""#22: the second overlapping inbound must not fail the webhook.
+
+		Before the atomic write, the second inbound's thread save raised
+		TimestampMismatchError (the first had re-saved the row through its
+		own object); the webhook returned 500, the whole request rolled
+		back, and the provider retried. Both writes are simulated with two
+		stale objects of the same row -- exactly what two concurrent
+		requests hold.
+		"""
+		thread = self._thread()
+		# A second thread of the SAME contact on another account: the write
+		# targets one row, not every row of the contact.
+		other_thread = RelayThread.get_or_create(self.contact.name, self._other_account().name)
+
+		earlier = add_to_date(now_datetime(), minutes=-5)
+		later = add_to_date(now_datetime(), minutes=-4)
+
+		first = frappe.get_doc("Relay Thread", thread.name)
+		second = frappe.get_doc("Relay Thread", thread.name)
+		first.update_timestamps(earlier, "Incoming")
+		# Before the fix this raised TimestampMismatchError.
+		second.update_timestamps(later, "Incoming")
+
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", thread.name, "unread_count"),
+			2,
+			"one of the two inbounds lost its increment",
+		)
+		self.assertEqual(
+			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_message_at")),
+			later,
+		)
+		self.assertEqual(
+			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_inbound_at")),
+			later,
+		)
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", other_thread.name, "unread_count"),
+			0,
+			"the write reached the contact's other thread",
+		)
+		self.assertIsNone(
+			frappe.db.get_value("Relay Thread", other_thread.name, "last_inbound_at"),
+			"the write reached the contact's other thread",
+		)
+
+	def test_an_inbound_that_lands_out_of_order_does_not_rollback_the_thread_timestamps(self):
+		"""#22: a commit that lands after a LATER inbound's commit must not
+		drag the thread's stamps backwards. InnoDB hands the rows to the
+		commits in request order, not in creation order."""
+		thread = self._thread()
+		later = add_to_date(now_datetime(), minutes=-4)
+		earlier = add_to_date(now_datetime(), minutes=-5)
+
+		first = frappe.get_doc("Relay Thread", thread.name)
+		first.update_timestamps(later, "Incoming")
+		second = frappe.get_doc("Relay Thread", thread.name)
+		# Before the fix this raised TimestampMismatchError; a plain
+		# assignment (no GREATEST) would silently move the stamp backwards.
+		second.update_timestamps(earlier, "Incoming")
+
+		self.assertEqual(
+			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_message_at")),
+			later,
+			"the out-of-order inbound dragged last_message_at backwards",
+		)
+		self.assertEqual(
+			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_inbound_at")),
+			later,
+			"the out-of-order inbound dragged last_inbound_at backwards",
+		)
+
+	def test_a_fresh_thread_stamps_last_inbound_at_on_its_first_inbound(self):
+		"""#22 PIN: GREATEST over a NULL column must not yield NULL.
+
+		MariaDB's GREATEST returns NULL when any argument is NULL, so the
+		write must COALESCE the column before taking the maximum, or a
+		thread's first ever inbound leaves last_inbound_at unset and the
+		inbox loses the stamp.
+		"""
+		thread = self._thread()
+		ts = add_to_date(now_datetime(), minutes=-1)
+
+		frappe.get_doc("Relay Thread", thread.name).update_timestamps(ts, "Incoming")
+
+		self.assertEqual(
+			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_inbound_at")),
+			get_datetime(ts),
+			"the first inbound on a fresh thread did not stamp last_inbound_at",
+		)
