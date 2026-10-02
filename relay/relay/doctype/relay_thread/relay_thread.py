@@ -43,10 +43,14 @@ class RelayThread(Document):
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def update_timestamps(self, last_message_at: str, direction: str = "incoming"):
-		"""Update thread metadata after a new message."""
+	def update_timestamps(self, last_message_at: str, direction: str):
+		"""Update thread metadata after a new message.
+
+		`direction` is the message's Relay Message.direction, so it is spelled
+		as that Select's options are: "Incoming" or "Outgoing".
+		"""
 		self.last_message_at = last_message_at
-		if direction == "incoming":
+		if direction == "Incoming":
 			self.unread_count = (self.unread_count or 0) + 1
 		self.save(ignore_permissions=True)
 
