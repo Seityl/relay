@@ -126,6 +126,15 @@ def classify_message(message_doc, thread_doc=None, contact_doc=None) -> IntentRe
     if contact_doc and contact_doc.is_blocked and detected_intent != "Start":
         return IntentResult(matched=False, intent=detected_intent)
 
+    # An integrating app that fully handled this inbound (answered the patient,
+    # recorded the outcome) claims it during the inbound's insert transaction;
+    # the handler commits before classification, so read the claim FRESH -- the
+    # caller's copy predates the write. No rule runs for a claimed message:
+    # no reply, no thread move, no tags -- not even the fallback
+    # (Seityl/relay#25; the rxflow double-reply coordination).
+    if message_doc.name and frappe.db.get_value("Relay Message", message_doc.name, "handled_by"):
+        return IntentResult(matched=False, intent=detected_intent)
+
     rules = _get_active_rules(message_doc.account)
 
     for rule in rules:
