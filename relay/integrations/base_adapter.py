@@ -12,7 +12,24 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+import frappe
 from werkzeug.wrappers import Response
+
+
+class PermanentRejection(frappe.ValidationError):
+	"""A refusal that will not change by retrying (Seityl/relay#7).
+
+	Adapters raise it when the provider refuses a send for a reason that is
+	a property of the request or the account -- a compliance gate, an invalid
+	recipient, an unsubscribed contact, a closed session window -- rather
+	than of the moment. The outbound queue treats it as terminal (no backoff,
+	no retry); callers see a clean ValidationError with the reason named.
+
+	Subclassing frappe.ValidationError is deliberate: the queue must catch
+	this class BEFORE its bare `except Exception`, while every caller of
+	`send_message` -- the SPA API, rxflow's sender, the auto-reply engine --
+	keeps receiving the ordinary handled-refusal shape they already handle.
+	"""
 
 
 @dataclass

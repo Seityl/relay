@@ -7,6 +7,7 @@ import frappe
 from frappe.model.document import Document
 
 from relay.compliance.consent import check_can_send
+from relay.compliance.session_window import check_session_window
 from relay.relay.doctype.relay_contact.relay_contact import (
 	RelayContact,
 )
@@ -86,6 +87,12 @@ def send_message(
 		message_type = "Template"
 	elif interactive_payload:
 		message_type = "Interactive"
+
+	# Consulted before queueing (#7): outside a WhatsApp channel's 24-hour
+	# session window a freeform message is a deterministic provider refusal,
+	# so it is refused here with the reason named instead of being queued to
+	# burn its retries. Templates and Interactive sends are not bound.
+	check_session_window(contact.name, account, message_type)
 
 	doc = frappe.get_doc(
 		{
