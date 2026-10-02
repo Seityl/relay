@@ -14,6 +14,8 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
+from relay.relay.doctype.relay_thread.relay_thread import RelayThread
+
 ACCOUNT = "Unread Count Test Account"
 
 
@@ -174,3 +176,89 @@ class TestRelayThread(IntegrationTestCase):
 		)
 		backfill()
 		self.assertEqual(frappe.db.get_value("Relay Thread", thread.name, "last_inbound_at"), stamp)
+
+	# --- #22: one conversation is one thread until it is over -------------
+
+	def test_an_inbound_continues_the_thread_a_previous_rule_moved_out_of_open(self):
+		"""#22: Greeting moved the thread to Bot Handling; the next inbound
+		still lands on it.
+
+		The old lookup matched only status "Open", so once any rule had moved
+		the thread, the very next message from the same contact opened a new
+		thread and the conversation walked across threads, stranding unread
+		counts on threads the conversation had left.
+		"""
+		thread = self._thread()
+		frappe.db.set_value("Relay Thread", thread.name, "status", "Bot Handling")
+
+		continued = RelayThread.get_or_create(self.contact.name, self.account.name)
+
+		self.assertEqual(
+			continued.name,
+			thread.name,
+			"a live thread the rules moved out of Open was abandoned; the "
+			"conversation splits across threads and unread counts strand",
+		)
+
+	def test_a_terminal_thread_starts_a_fresh_conversation_on_the_next_inbound(self):
+		"""#22 PIN: Resolved/Closed/Archived end the conversation.
+
+		The lookup must stay narrow enough that a finished conversation is
+		not resurrected: the desk Resolve button and the Stop rule both rely
+		on the next inbound opening a fresh thread.
+		"""
+		for terminal in ("Resolved", "Closed", "Archived"):
+			with self.subTest(terminal=terminal):
+				thread = self._thread()
+				frappe.db.set_value("Relay Thread", thread.name, "status", terminal)
+
+				fresh = RelayThread.get_or_create(self.contact.name, self.account.name)
+
+				self.assertNotEqual(
+					fresh.name,
+					thread.name,
+					f"a {terminal} thread was continued; the conversation is over",
+				)
+
+	def test_a_contact_with_a_legacy_split_continues_their_newest_live_thread(self):
+		"""#22: contacts whose conversation already split (pre-fix data) get
+		the newest live thread, not whichever one happens to say Open."""
+		older = self._thread()
+		newer = self._thread()
+		# Make the ordering unambiguous: two inserts can land in the same
+		# clock tick (the backfill test hit the same wall).
+		frappe.db.set_value(
+			"Relay Thread", older.name, "creation", add_to_date(now_datetime(), days=-1),
+			update_modified=False,
+		)
+		frappe.db.set_value("Relay Thread", newer.name, "status", "Bot Handling")
+
+		continued = RelayThread.get_or_create(self.contact.name, self.account.name)
+
+		self.assertEqual(
+			continued.name,
+			newer.name,
+			"the older Open thread won; with the split data the conversation "
+			"resumes on the wrong thread",
+		)
+
+	def test_when_the_newest_thread_is_terminal_an_older_live_thread_is_continued(self):
+		"""#22: "live" decides, not "newest". A thread resolved five minutes
+		ago does not outrank a thread the bot is still handling."""
+		older = self._thread()
+		newer = self._thread()
+		frappe.db.set_value(
+			"Relay Thread", older.name, "creation", add_to_date(now_datetime(), days=-1),
+			update_modified=False,
+		)
+		frappe.db.set_value("Relay Thread", older.name, "status", "Bot Handling")
+		frappe.db.set_value("Relay Thread", newer.name, "status", "Resolved")
+
+		continued = RelayThread.get_or_create(self.contact.name, self.account.name)
+
+		self.assertEqual(
+			continued.name,
+			older.name,
+			"the resolved (newest) thread was continued; a finished "
+			"conversation must not swallow the live one",
+		)
