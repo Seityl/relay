@@ -115,6 +115,13 @@ class TestTemplateStatusVocabulary(unittest.TestCase):
 			f"these map to statuses Relay Template cannot store: {sorted(produced - _template_statuses())}",
 		)
 
+	def test_only_an_approval_makes_a_template_approved(self):
+		"""rxflow sends a template only when it reads exactly "Approved"."""
+		self.assertEqual({k for k, v in twilio_adapter.TEMPLATE_STATUS_MAP.items() if v == "Approved"}, {"approved"})
+		self.assertEqual(
+			{k for k, v in meta_cloud_api.TEMPLATE_STATUS_MAP.items() if v == "Approved"}, {"APPROVED", "REINSTATED"}
+		)
+
 	def test_a_disabled_template_is_not_called_rejected_or_paused(self):
 		self.assertIn("Disabled", _template_statuses())
 		self.assertEqual(twilio_adapter.TEMPLATE_STATUS_MAP.get("disabled"), "Disabled")
@@ -134,6 +141,13 @@ class TestTwilioAsksForTemplateStatus(unittest.TestCase):
 		self.assertEqual(event.provider_template_id, SID_A)
 		self.assertEqual(event.status, "Approved")
 		self.assertEqual(event.provider_status, "approved")
+
+	def test_twilio_is_understood_whichever_case_it_spells_a_status_in(self):
+		# The API answers in lower case; Twilio's own docs table capitalises.
+		with patch.object(twilio_adapter.requests, "get", return_value=_Response(200, _approval(SID_A, "Approved"))):
+			event = self.adapter.fetch_template_status(_Template())
+
+		self.assertEqual(event.status, "Approved")
 
 	def test_a_twilio_status_relay_does_not_know_is_refused_naming_the_template(self):
 		with patch.object(twilio_adapter.requests, "get", return_value=_Response(200, _approval(SID_A, "under_review"))):
@@ -178,6 +192,16 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 		)
 		twilio.access_token = "test-auth-token"
 		cls.twilio_account = twilio.insert(ignore_permissions=True)
+
+		frappe.get_doc(
+			{
+				"doctype": "Relay Account",
+				"account_name": "Template Status Inactive Account",
+				"status": "Inactive",
+				"channel": LONELY_CHANNEL,
+				"credentials": json.dumps({"account_sid": "AC" + "0" * 32}),
+			}
+		).insert(ignore_permissions=True)
 
 		meta = frappe.get_doc(
 			{
@@ -261,7 +285,8 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 	def test_a_pending_twilio_template_becomes_approved_when_twilio_says_so(self):
 		approved = self._template(TWILIO_CHANNEL, "Pending", SID_A)
 		waiting = self._template(TWILIO_CHANNEL, "Pending", SID_B)
-		frappe.db.set_value("Relay Template", approved.name, "modified", "2026-01-01 00:00:00", update_modified=False)
+		for template in (approved, waiting):
+			frappe.db.set_value("Relay Template", template.name, "modified", "2026-01-01 00:00:00", update_modified=False)
 
 		self._poll({SID_A: _Response(200, _approval(SID_A, "approved")), SID_B: _Response(200, _approval(SID_B, "pending"))})
 
@@ -275,6 +300,9 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 			"2026-01-01 00:00:00",
 			f"{approved.name} changed status without its document being saved",
 		)
+		# Nothing changed, so nothing is saved: every template would
+		# otherwise look modified every hour.
+		self.assertEqual(str(frappe.db.get_value("Relay Template", waiting.name, "modified")), "2026-01-01 00:00:00")
 
 	def test_one_templates_failure_does_not_stop_the_next_and_names_it(self):
 		missing = self._template(TWILIO_CHANNEL, "Pending", SID_A)
@@ -288,8 +316,9 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 		self.assertEqual(self._status(approved), "Approved")
 		logged = " ".join(str(c) for c in log_error.call_args_list)
 		self.assertIn(missing.name, logged)
+		self.assertIn("HTTP 404", logged)
 
-	def test_a_template_whose_channel_has_no_active_account_is_reported_not_polled(self):
+	def test_a_template_whose_channel_has_only_an_inactive_account_is_reported_not_polled(self):
 		lonely = self._template(LONELY_CHANNEL, "Pending", SID_A)
 
 		fake_get, log_error = self._poll({})
@@ -300,12 +329,25 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 		self.assertIn(lonely.name, logged)
 		self.assertIn(LONELY_CHANNEL, logged)
 
+	def test_a_template_relay_holds_no_provider_id_for_is_not_asked_about(self):
+		draft = self._template(TWILIO_CHANNEL, "Draft", "")
+
+		fake_get, log_error = self._poll({})
+
+		fake_get.assert_not_called()
+		self.assertEqual(self._status(draft), "Draft")
+		self.assertNotIn(draft.name, " ".join(str(c) for c in log_error.call_args_list))
+
 	def test_a_template_on_a_channel_that_pushes_its_status_is_not_polled(self):
 		self._template(META_CHANNEL, "Pending", "1689556908129832")
 
-		fake_get, _ = self._poll({})
+		from relay.integrations import template_status
+
+		with patch.object(template_status, "get_adapter", wraps=template_status.get_adapter) as built:
+			fake_get, _ = self._poll({})
 
 		fake_get.assert_not_called()
+		self.assertNotIn("Meta Cloud API", [c.args[0] for c in built.call_args_list])
 
 	def test_the_poll_runs_every_hour(self):
 		self.assertIn(
@@ -322,6 +364,17 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 		self._meta_webhook(1689556908129832, "APPROVED")
 
 		self.assertEqual(self._status(template), "Approved")
+
+	def test_a_meta_event_moves_only_the_template_with_that_exact_id(self):
+		# Above 2**53 a number compared with text in SQL is compared as a
+		# float, and these two ids are the same float.
+		target = self._template(META_CHANNEL, "Pending", "18014398509481985")
+		neighbour = self._template(META_CHANNEL, "Pending", "18014398509481984")
+
+		self._meta_webhook(18014398509481985, "APPROVED")
+
+		self.assertEqual(self._status(target), "Approved")
+		self.assertEqual(self._status(neighbour), "Pending")
 
 	def test_a_flagged_meta_template_stays_approved(self):
 		template = self._template(META_CHANNEL, "Approved", "1689556908129833")
