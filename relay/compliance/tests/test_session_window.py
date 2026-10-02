@@ -219,6 +219,62 @@ class TestSessionWindow(IntegrationTestCase):
 
 		self.assertTrue(result["success"])
 
+	def test_the_window_binds_the_meta_channel_too(self):
+		"""Both WhatsApp providers enforce it, each by its own key."""
+		self._thread(
+			self.meta_account, last_inbound_at=add_to_date(now_datetime(), **OUTSIDE_WINDOW)
+		)
+
+		with self.assertRaises(PermanentRejection):
+			self._send(self.meta_account)
+
+	def test_an_outbound_message_does_not_open_the_session(self):
+		"""The anchor is the contact's last INBOUND message.
+
+		A template relay sent an hour ago must not read as a session: the
+		window is about when the customer last wrote.
+		"""
+		thread = self._thread(self.twilio_account)
+		self._inbound(
+			self.twilio_account, thread, created_at=add_to_date(now_datetime(), days=-4)
+		)
+		frappe.get_doc(
+			{
+				"doctype": "Relay Message",
+				"thread": thread.name,
+				"contact": self.contact.name,
+				"account": self.twilio_account.name,
+				"direction": "Outgoing",
+				"status": "Sent",
+				"content_type": "text",
+				"message_body": "a template relay sent earlier",
+			}
+		).insert(ignore_permissions=True)
+
+		with self.assertRaises(PermanentRejection):
+			self._send(self.twilio_account)
+
+	def test_the_window_follows_the_provider_not_the_channel_name(self):
+		"""A channel may be named anything; the window keys on its provider."""
+		channel = frappe.get_doc(
+			{
+				"doctype": "Relay Channel",
+				"channel_name": "Session Window Oddly Named Channel",
+				"provider": "Twilio",
+				"enabled": 1,
+				"adapter_class": "relay.integrations.twilio_adapter.TwilioAdapter",
+				"handler_module": "relay.integrations.twilio_adapter",
+				"webhook_path": "/api/method/relay.webhooks.handler.receive",
+			}
+		).insert(ignore_permissions=True)
+		account = self._account("Session Window Oddly Named", channel.name)
+		self._thread(
+			account, last_inbound_at=add_to_date(now_datetime(), **OUTSIDE_WINDOW)
+		)
+
+		with self.assertRaises(PermanentRejection):
+			self._send(account)
+
 	def test_the_session_follows_the_contact_across_threads(self):
 		"""The window is the provider's, keyed on the contact -- not on one
 		relay thread.
