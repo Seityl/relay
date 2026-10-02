@@ -11,6 +11,15 @@ from frappe.model.document import Document
 class RelayThread(Document):
 	"""A conversation thread between the business and a contact."""
 
+	# A conversation is over only when a human closed it (desk Resolve) or a
+	# rule did (Stop -> Closed). The other statuses are live workflow states:
+	# with the old "status = Open" lookup, every rule move (Greeting ->
+	# "Bot Handling", Refill -> "Awaiting Agent") pushed the thread out of the
+	# lookup and the next inbound -- or the rule's own auto-reply -- opened a
+	# fresh thread, so one conversation walked across threads and stranded its
+	# unread counts (Seityl/relay#22).
+	TERMINAL_STATUSES = ("Resolved", "Closed", "Archived")
+
 	def validate(self):
 		if not self.account and self.contact:
 			contact = frappe.get_doc("Relay Contact", self.contact)
@@ -19,18 +28,33 @@ class RelayThread(Document):
 
 	@staticmethod
 	def get_or_create(contact: str, account: str | None = None, **kwargs) -> "RelayThread":
-		"""Fetch an open thread for a contact or create one."""
+		"""Fetch the contact's live thread on this account, or create one.
+
+		"Live" is "not terminal", not "Open": a thread the rules moved to
+		"Bot Handling" or "Awaiting Agent" is the same conversation and keeps
+		receiving its messages. If several live threads exist (data that
+		split under the old lookup), the newest one continues. A thread with
+		a NULL status is out of contract -- every writer goes through the ORM,
+		whose default is Open -- and such a row is replaced rather than
+		continued.
+		"""
 		if not account:
 			contact_doc = frappe.get_doc("Relay Contact", contact)
 			account = contact_doc.account or get_default_account_for_contact()
 
-		existing = frappe.db.get_value(
+		existing = frappe.get_all(
 			"Relay Thread",
-			{"contact": contact, "account": account, "status": "Open"},
-			"name",
+			filters={
+				"contact": contact,
+				"account": account,
+				"status": ("not in", RelayThread.TERMINAL_STATUSES),
+			},
+			fields=["name"],
+			order_by="creation desc",
+			limit=1,
 		)
 		if existing:
-			return frappe.get_doc("Relay Thread", existing)
+			return frappe.get_doc("Relay Thread", existing[0].name)
 
 		doc = frappe.get_doc(
 			{
