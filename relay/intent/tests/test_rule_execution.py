@@ -40,6 +40,7 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import get_datetime
 
 from relay.intent.engine import classify_message
 
@@ -74,6 +75,17 @@ class TestRuleExecution(IntegrationTestCase):
 				"channel": "Email",
 			}
 		).insert(ignore_permissions=True)
+
+	def setUp(self):
+		# IntegrationTestCase rolls back per class, not per test -- and this
+		# class's tests share the contact: test_a_stop_message_unsubscribes
+		# blocks it, and without a savepoint every later test inherits the
+		# block and fails for a reason that is not the one under test.
+		frappe.db.savepoint("rule_execution")
+		self.addCleanup(frappe.db.rollback, save_point="rule_execution")
+		# The savepoint restores the ROW, not the class fixture object:
+		# process_stop_request set is_blocked on the shared object in memory.
+		self.contact.reload()
 
 	def _classify(self, message, held):
 		"""Classify without letting the engine commit the test transaction.
@@ -204,3 +216,202 @@ class TestRuleExecution(IntegrationTestCase):
 			self._classify(message, held)
 		except Exception as e:
 			self.fail(f"classification raised {type(e).__name__}: {e}")
+
+	# --- #22: the engine's write must not lose a concurrent inbound -------
+
+	def test_an_inbound_landing_while_a_rule_applies_is_not_lost_and_does_not_collide(self):
+		"""#22: a second inbound landing between the engine's read of the
+		thread and its write of the rule's actions must survive.
+
+		The engine used to save the whole thread document it had reloaded;
+		an inbound landing in that window either collided with the save
+		(TimestampMismatchError, swallowed by the handler, rule lost) or
+		wrote stale counters back. The overlap is simulated deterministically:
+		while the rule's thread write is in flight, the second inbound's
+		insert runs -- the way two concurrent requests genuinely interleave.
+		"""
+		thread = frappe.get_doc(
+			{
+				"doctype": "Relay Thread",
+				"contact": self.contact.name,
+				"account": self.account.name,
+				"status": "Open",
+			}
+		).insert(ignore_permissions=True)
+		held = frappe.get_doc("Relay Thread", thread.name)
+
+		message = frappe.get_doc(
+			{
+				"doctype": "Relay Message",
+				"thread": thread.name,
+				"contact": self.contact.name,
+				"account": self.account.name,
+				"direction": "Incoming",
+				"status": "Delivered",
+				"content_type": "text",
+				"message_body": "hello",
+				"message_id": frappe.generate_hash(length=12),
+			}
+		).insert(ignore_permissions=True)
+
+		real_set_value = frappe.db.set_value
+		landed = []
+
+		def inbound_lands_mid_apply(doctype, name=None, *args, **kwargs):
+			if doctype == "Relay Thread" and name == thread.name and not landed:
+				landed.append(
+					frappe.get_doc(
+						{
+							"doctype": "Relay Message",
+							"thread": thread.name,
+							"contact": self.contact.name,
+							"account": self.account.name,
+							"direction": "Incoming",
+							"status": "Delivered",
+							"content_type": "text",
+							"message_body": "I need a refill please",
+							"message_id": frappe.generate_hash(length=12),
+						}
+					).insert(ignore_permissions=True)
+				)
+			return real_set_value(doctype, name, *args, **kwargs)
+
+		with (
+			patch(
+				"relay.intent.engine.send_auto_reply",
+				return_value={"success": True, "message_id": "stub"},
+			),
+			patch("frappe.db.commit"),
+			patch("frappe.db.set_value", side_effect=inbound_lands_mid_apply),
+		):
+			result = classify_message(message, held, self.contact)
+
+		self.assertTrue(result.matched, "no rule matched a greeting at all")
+		self.assertTrue(landed, "the concurrent inbound never landed, so this test exercised no overlap")
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", thread.name, "status"),
+			"Bot Handling",
+			"the matched rule's set_thread_status never reached the database",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", thread.name, "unread_count"),
+			2,
+			"the inbound that landed while the rule applied lost its count",
+		)
+		self.assertEqual(
+			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_message_at")),
+			get_datetime(landed[0].creation),
+			"the rule's write regressed the stamp of the inbound that landed mid-apply",
+		)
+
+	# --- #22: the reply stays on the conversation's thread and account ----
+
+	def test_a_stop_goodbye_lands_on_the_thread_it_closes(self):
+		"""#22: the goodbye that ends a conversation belongs to that
+		conversation.
+
+		The Stop rule closes the thread and then sends its goodbye; the old
+		lookup matched only "Open" threads, so the goodbye opened a fresh
+		thread of its own -- and the next message from the contact landed
+		there, not on the thread that received the STOP.
+		"""
+		message, held = self._inbound("STOP")
+		# The real send path: the goodbye's message row is the point.
+		with patch("frappe.db.commit"):
+			result = classify_message(message, held, self.contact)
+
+		self.assertTrue(result.matched, "no rule matched the STOP")
+		goodbye = frappe.get_all(
+			"Relay Message",
+			filters={"contact": self.contact.name, "direction": "Outgoing"},
+			fields=["name", "thread"],
+			order_by="creation desc",
+			limit=1,
+		)
+		self.assertEqual(len(goodbye), 1, "no goodbye was recorded at all")
+		self.assertEqual(
+			goodbye[0].thread,
+			message.thread,
+			"the goodbye opened a thread of its own instead of closing the conversation on it",
+		)
+
+	def test_the_opt_out_is_honoured_even_when_the_default_outgoing_account_has_no_session(self):
+		"""#22: the opt-out must survive the goodbye's window check.
+
+		send_auto_reply used to send on the DEFAULT OUTGOING account; on a
+		multi-account site the goodbye's freeform window check then ran
+		against an account the contact never wrote to, raised
+		PermanentRejection, and -- swallowed by the handler -- the STOP
+		never took effect. The conversation's own account has an open
+		session by definition: the inbound that triggered the rule just
+		landed on it.
+		"""
+		default_outgoing = frappe.get_doc(
+			{
+				"doctype": "Relay Account",
+				"account_name": "Rule Execution Default Outgoing",
+				"status": "Active",
+				"channel": "Twilio",
+				"is_default_outgoing": 1,
+			}
+		).insert(ignore_permissions=True)
+		conversation_account = frappe.get_doc(
+			{
+				"doctype": "Relay Account",
+				"account_name": "Rule Execution Conversation",
+				"status": "Active",
+				"channel": "Twilio",
+			}
+		).insert(ignore_permissions=True)
+		thread = frappe.get_doc(
+			{
+				"doctype": "Relay Thread",
+				"contact": self.contact.name,
+				"account": conversation_account.name,
+				"status": "Open",
+			}
+		).insert(ignore_permissions=True)
+		held = frappe.get_doc("Relay Thread", thread.name)
+		message = frappe.get_doc(
+			{
+				"doctype": "Relay Message",
+				"thread": thread.name,
+				"contact": self.contact.name,
+				"account": conversation_account.name,
+				"direction": "Incoming",
+				"status": "Delivered",
+				"content_type": "text",
+				"message_body": "STOP",
+				"message_id": frappe.generate_hash(length=12),
+			}
+		).insert(ignore_permissions=True)
+
+		with patch("frappe.db.commit"):
+			result = classify_message(message, held, self.contact)
+
+		self.assertTrue(result.matched, "no rule matched the STOP")
+		self.assertTrue(
+			frappe.db.get_value("Relay Contact", self.contact.name, "is_blocked"),
+			"a contact who replied STOP was not blocked; the goodbye's window "
+			"check against the wrong account ate the opt-out",
+		)
+		self.assertTrue(
+			frappe.db.exists(
+				"Relay Consent Log",
+				{"contact": self.contact.name, "event_type": "Opt-Out"},
+			),
+			"no Opt-Out was recorded, so there is no audit trail for the unsubscribe",
+		)
+		goodbye = frappe.get_all(
+			"Relay Message",
+			filters={
+				"contact": self.contact.name,
+				"direction": "Outgoing",
+				"account": conversation_account.name,
+			},
+			fields=["name", "thread"],
+			order_by="creation desc",
+			limit=1,
+		)
+		self.assertEqual(len(goodbye), 1, "no goodbye went out on the conversation's account")
+		self.assertEqual(goodbye[0].thread, thread.name, "the goodbye landed on a thread of its own")
