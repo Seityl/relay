@@ -125,8 +125,11 @@ class TestRelayThread(IntegrationTestCase):
 	def test_the_backfill_sets_last_inbound_at_from_the_threads_last_incoming_message(self):
 		"""#7: the backfill patch stamps each thread from its own history.
 
-		A thread with no incoming message keeps last_inbound_at unset: no
-		session ever opened on it, and the backfill must not invent one.
+		The migration's targets are threads that predate the field: their
+		stamp is NULL, so the fixture clears it the way reality has it, and
+		the patch must read the thread's last INCOMING message. A thread
+		with no incoming message keeps last_inbound_at unset: no session
+		ever opened on it, and the backfill must not invent one.
 		"""
 		from relay.patches.backfill_last_inbound_at import execute as backfill
 
@@ -138,13 +141,19 @@ class TestRelayThread(IntegrationTestCase):
 		frappe.db.set_value(
 			"Relay Message", first.name, "creation", add_to_date(now_datetime(), days=-2)
 		)
-		self._message(thread, "Outgoing", "Sent")
+		outgoing = self._message(thread, "Outgoing", "Sent")
+		# A pre-field thread: the field did not exist when these messages
+		# were written, so nothing has stamped it yet.
+		frappe.db.set_value("Relay Thread", thread.name, "last_inbound_at", None)
 
 		backfill()
 
 		stamp = frappe.db.get_value("Relay Thread", thread.name, "last_inbound_at")
 		self.assertEqual(stamp, get_datetime(second.creation))
+		self.assertNotEqual(stamp, get_datetime(outgoing.creation))
 
+		# A thread with no incoming message: no session ever opened on it,
+		# and the backfill must not invent one.
 		quiet = self._thread()
 		backfill()
 		self.assertIsNone(
