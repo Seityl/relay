@@ -424,3 +424,45 @@ class TestRuleExecution(IntegrationTestCase):
 		)
 		self.assertEqual(len(goodbye), 1, "no goodbye went out on the conversation's account")
 		self.assertEqual(goodbye[0].thread, thread.name, "the goodbye landed on a thread of its own")
+
+	def test_a_template_auto_reply_also_lands_on_the_conversations_thread(self):
+		"""#22 PIN: a Template auto-reply is pinned to the conversation's
+		thread and account exactly like a freeform one — both branches pass
+		account and thread, so both must be guarded by the same tests."""
+		template = frappe.get_doc(
+			{
+				"doctype": "Relay Template",
+				"template_name": f"rule-exec-tpl-{frappe.generate_hash(length=6)}",
+				"status": "Approved",
+				"body_text": "Hello {{1}}",
+			}
+		).insert(ignore_permissions=True)
+		rule = frappe.get_doc(
+			{
+				"doctype": "Relay Auto Reply Rule",
+				"rule_name": f"Template Reply {frappe.generate_hash(length=6)}",
+				"enabled": 1,
+				"priority": 90,
+				"match_type": "Intent",
+				"intent": "Refill",
+				"response_type": "Template",
+				"template": template.name,
+			}
+		).insert(ignore_permissions=True)
+
+		message, held = self._inbound("I need a refill please")
+		with patch("frappe.db.commit"):
+			result = classify_message(message, held, self.contact)
+
+		self.assertTrue(result.matched, "the template rule did not match a refill")
+		reply = frappe.get_all(
+			"Relay Message",
+			filters={"contact": self.contact.name, "direction": "Outgoing"},
+			fields=["thread", "account", "message_type"],
+			order_by="creation desc",
+			limit=1,
+		)
+		self.assertEqual(len(reply), 1, "no template reply was recorded at all")
+		self.assertEqual(reply[0].thread, message.thread, "the template reply opened a thread of its own")
+		self.assertEqual(reply[0].account, self.account.name, "the template reply went out on the wrong account")
+		self.assertEqual(reply[0].message_type, "Template", "the reply was not sent as a template")
