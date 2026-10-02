@@ -52,6 +52,10 @@ class RelayThread(Document):
 		self.last_message_at = last_message_at
 		if direction == "Incoming":
 			self.unread_count = (self.unread_count or 0) + 1
+			# The 24-hour session window (#7) is anchored on when the
+			# contact last wrote, not on this thread's last message of
+			# any direction.
+			self.last_inbound_at = last_message_at
 		self.save(ignore_permissions=True)
 
 

@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 relay.patches.migrate_v0_2_medium_agnostic
 relay.patches.seed_twilio_channel
+relay.patches.backfill_last_inbound_at

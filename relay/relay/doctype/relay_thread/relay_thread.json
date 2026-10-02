@@ -14,6 +14,7 @@
   "status",
   "assigned_to",
   "last_message_at",
+  "last_inbound_at",
   "unread_count",
   "tags",
   "section_break_1",
@@ -64,6 +65,12 @@
    "label": "Last Message At"
   },
   {
+   "fieldname": "last_inbound_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Inbound At"
+  },
+  {
    "default": "0",
    "fieldname": "unread_count",
    "fieldtype": "Int",
@@ -98,7 +105,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-18 17:30:00.000000",
+ "modified": "2026-10-02 17:30:00.000000",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Thread",
