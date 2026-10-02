@@ -50,6 +50,7 @@ from relay.integrations.base_adapter import (
 	InboundMessage,
 	InboundPayload,
 	NormalizedRecipient,
+	PermanentRejection,
 	StatusEvent,
 	TemplateStatusEvent,
 )
@@ -101,6 +102,19 @@ MEDIA_KINDS = (
 	("audio/", "audio"),
 )
 
+#: Twilio error codes whose refusal is a property of the request or the
+#: account, not of the moment (Seityl/relay#7). Each is read from Twilio's
+#: own error-codes page (https://www.twilio.com/docs/api/errors/{code});
+#: retrying any of them bills a call whose outcome cannot change:
+#: - 20003 Permission Denied -- wrong/expired credentials, or a Primary
+#:   Compliance Profile that is not approved (the live example on #7).
+#: - 21211 Invalid 'To' Phone Number -- not E.164.
+#: - 63016 Outside messaging window -- freeform after WhatsApp's 24-hour
+#:   window closed; the provider-side twin of the pre-queue window check.
+#: - 21608 unverified recipient on a trial / compliance-gated account.
+#: - 21610 recipient unsubscribed (replied STOP).
+PERMANENT_CODES = frozenset({20003, 21211, 63016, 21608, 21610})
+
 
 def _scheme(value: str) -> str:
 	"""`15550002222` -> `whatsapp:+15550002222`."""
@@ -108,6 +122,19 @@ def _scheme(value: str) -> str:
 	if bare.startswith("whatsapp:"):
 		return bare
 	return f"whatsapp:+{bare.lstrip('+')}"
+
+
+def _error_body(response) -> dict:
+	"""Twilio's error JSON ({code, message, ...}); {} if the body is not one.
+
+	A non-JSON body (an HTML error page, a proxy's) must not become a
+	ClassificationByJSONDecodeError: an unparseable refusal is simply not
+	classified, and the queue keeps its backoff.
+	"""
+	try:
+		return response.json() or {}
+	except ValueError:
+		return {}
 
 
 class TwilioAdapter(BaseChannelAdapter):
@@ -252,6 +279,15 @@ class TwilioAdapter(BaseChannelAdapter):
 		except requests.HTTPError:
 			detail = response.text
 			frappe.log_error(title="Relay Twilio API Error", message=f"{url}\n{detail}")
+			# #7: a deterministic refusal is terminal, not a retry. The
+			# queue catches PermanentRejection before its bare
+			# `except Exception` and refuses the row outright.
+			body = _error_body(response)
+			if body.get("code") in PERMANENT_CODES:
+				raise PermanentRejection(
+					f"Twilio rejected the request ({body.get('code')}): "
+					f"{body.get('message') or detail}"
+				)
 			# The queue catches this and applies its backoff.
 			frappe.throw(f"Twilio rejected the request: {detail}")
 		except requests.RequestException as e:
