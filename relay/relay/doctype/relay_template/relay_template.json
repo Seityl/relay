@@ -50,7 +50,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Draft\nPending\nApproved\nRejected\nPaused",
+   "options": "Draft\nPending\nApproved\nRejected\nPaused\nDisabled",
    "reqd": 1
   },
   {
@@ -147,7 +147,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 16:30:00.000000",
+ "modified": "2026-10-02 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Template",

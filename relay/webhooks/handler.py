@@ -385,10 +385,6 @@ def _persist_status_event(event: StatusEvent):
 
 def _persist_template_status_event(event: TemplateStatusEvent):
     """Update template approval status from a normalized template status event."""
-    if not event.provider_template_id or not event.status:
-        return
+    from relay.integrations.template_status import apply_template_status
 
-    frappe.db.sql(
-        "UPDATE `tabRelay Template` SET status = %(status)s WHERE provider_template_id = %(template_id)s",
-        {"status": event.status, "template_id": event.provider_template_id},
-    )
+    apply_template_status(event)

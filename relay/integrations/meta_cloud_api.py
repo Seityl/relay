@@ -24,6 +24,28 @@ from relay.integrations.base_adapter import (
 )
 from relay.integrations.registry import register
 
+#: Meta's `message_template_status_update` events -> Relay Template statuses
+#: (relay_template.json). None means the event says nothing about whether the
+#: template may be sent, so the status is left as it is. Every documented
+#: event is here; an unknown one is logged and changes nothing:
+#: https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/message_template_status_update
+TEMPLATE_STATUS_MAP = {
+	"APPROVED": "Approved",
+	"REINSTATED": "Approved",  # no longer flagged or disabled; sendable again
+	"PENDING": "Pending",
+	"IN_APPEAL": "Pending",  # rejected, and under review again
+	"REJECTED": "Rejected",
+	"PAUSED": "Paused",
+	"DISABLED": "Disabled",
+	"ARCHIVED": "Disabled",  # cannot be sent until unarchived
+	"DELETED": "Disabled",
+	"PENDING_DELETION": "Disabled",
+	"FLAGGED": None,  # at risk of being disabled, still sendable
+	"LIMIT_EXCEEDED": None,  # about the account's template count
+	"LOCKED": None,  # cannot be edited; says nothing about sending
+	"UNARCHIVED": None,  # back to whatever it was; Meta does not say what
+}
+
 
 class MetaCloudAPIAdapter(BaseChannelAdapter):
 	"""Send and receive messages via Meta's Cloud API."""
@@ -326,11 +348,27 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 		)
 
 	def _parse_template_status(self, value: dict, result: InboundPayload):
-		"""Normalize a Meta template status update."""
+		"""Normalize a Meta template status update into relay's vocabulary.
+
+		The event used to be stored as Meta spelled it ("APPROVED"), straight
+		into a Select whose options are relay's ("Approved").
+		"""
+		raw = value.get("event", "")
+		# Meta sends the id as a number; relay stores it as text.
+		template_id = str(value.get("message_template_id") or "")
+		if raw not in TEMPLATE_STATUS_MAP:
+			frappe.log_error(
+				title="Relay Template Status Not Understood",
+				message=(
+					f"Meta sent template status '{raw}' for template id {template_id}; "
+					"relay does not know it, so the Relay Template is left as it is."
+				),
+			)
 		result.template_status_events.append(
 			TemplateStatusEvent(
-				provider_template_id=value.get("message_template_id", ""),
-				status=value.get("event", ""),
+				provider_template_id=template_id,
+				status=TEMPLATE_STATUS_MAP.get(raw) or "",
+				provider_status=raw,
 				raw_payload=value,
 			)
 		)

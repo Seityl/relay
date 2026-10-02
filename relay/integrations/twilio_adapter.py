@@ -29,9 +29,10 @@ reading this file:
      distinguishes them by the presence of `MessageStatus`, so
      `parse_inbound_webhook` branches on that.
 
-No Twilio SDK. The REST surface used here is one form POST with HTTP Basic
-auth, and the signature is hmac + base64 from the standard library. Adding a
-dependency to a public MIT app to save that is not a good trade.
+No Twilio SDK. The REST surface used here is one form POST and one GET (a
+template's approval status, #6) with HTTP Basic auth, and the signature is
+hmac + base64 from the standard library. Adding a dependency to a public MIT
+app to save that is not a good trade.
 """
 
 import base64
@@ -50,6 +51,7 @@ from relay.integrations.base_adapter import (
 	InboundPayload,
 	NormalizedRecipient,
 	StatusEvent,
+	TemplateStatusEvent,
 )
 from relay.integrations.registry import register
 
@@ -73,6 +75,22 @@ STATUS_MAP = {
 	"failed": "Failed",
 	"canceled": "Cancelled",
 	"cancelled": "Cancelled",
+}
+
+CONTENT_API_ROOT = "https://content.twilio.com/v1"
+
+#: WhatsApp approval statuses as Twilio's Content API reports them -> Relay
+#: Template statuses (relay_template.json). Every documented status is here,
+#: so an unknown one is a change on Twilio's side and is refused, not stored:
+#: https://www.twilio.com/docs/content/content-types-overview#whatsapp-approval-statuses
+TEMPLATE_STATUS_MAP = {
+	"unsubmitted": "Draft",
+	"received": "Pending",  # with Twilio, not yet with WhatsApp
+	"pending": "Pending",
+	"approved": "Approved",
+	"rejected": "Rejected",
+	"paused": "Paused",
+	"disabled": "Disabled",
 }
 
 #: Twilio media MIME prefix -> Relay `content_type` option
@@ -240,6 +258,50 @@ class TwilioAdapter(BaseChannelAdapter):
 			frappe.log_error(title="Relay Twilio Transport Error", message=f"{url}\n{e}")
 			frappe.throw(f"Could not reach Twilio: {e}")
 		return response.json()
+
+	# --- templates -------------------------------------------------------
+
+	def fetch_template_status(self, template_doc) -> TemplateStatusEvent:
+		"""Ask Twilio where WhatsApp's review of one template stands.
+
+		Twilio has no webhook for this (#6), so relay polls. The per-template
+		ApprovalRequests resource is used rather than ContentAndApprovals
+		because its response shape is documented (`whatsapp.status`) and it
+		is addressed by the Content SID relay already holds.
+		"""
+		sid = template_doc.provider_template_id
+		if not sid:
+			frappe.throw(
+				f"Relay Template {template_doc.name} has no Provider Template ID, "
+				"so there is no Content SID to ask Twilio about."
+			)
+
+		url = f"{CONTENT_API_ROOT}/Content/{sid}/ApprovalRequests"
+		try:
+			response = requests.get(url, auth=self._auth(), timeout=30)
+			response.raise_for_status()
+		except requests.HTTPError:
+			frappe.throw(
+				f"Twilio would not give the approval status of Relay Template "
+				f"{template_doc.name} ({sid}): HTTP {response.status_code} {response.text}"
+			)
+		except requests.RequestException as e:
+			frappe.throw(f"Could not reach Twilio for Relay Template {template_doc.name} ({sid}): {e}")
+
+		raw = ((response.json().get("whatsapp") or {}).get("status") or "").lower()
+		if raw not in TEMPLATE_STATUS_MAP:
+			frappe.throw(
+				f"Twilio reports approval status '{raw}' for Relay Template "
+				f"{template_doc.name} ({sid}), which relay does not know; the "
+				"template is left as it is."
+			)
+
+		return TemplateStatusEvent(
+			provider_template_id=sid,
+			status=TEMPLATE_STATUS_MAP[raw],
+			provider_status=raw,
+			raw_payload=response.json(),
+		)
 
 	# --- inbound ---------------------------------------------------------
 

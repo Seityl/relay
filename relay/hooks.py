@@ -163,6 +163,8 @@ scheduler_events = {
 	],
 	"hourly": [
 		"relay.scheduler.notification_engine.hourly",
+		# Twilio has no template-status webhook, so relay asks (#6).
+		"relay.integrations.template_status.refresh_template_statuses",
 	],
 	"hourly_long": [
 		"relay.scheduler.notification_engine.hourly_long",
