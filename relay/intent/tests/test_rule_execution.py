@@ -2,7 +2,8 @@
 # For license information, please see license.txt
 
 """A matched rule is actually applied to the thread (#9), and the write
-survives overlapping inbounds (#22).
+survives overlapping inbounds (#22). An inbound another integration has
+fully handled gets no rule at all (#25).
 
 `classify_message` raised on every single inbound message, and the caller
 swallows it:
@@ -311,6 +312,101 @@ class TestRuleExecution(IntegrationTestCase):
 			get_datetime(frappe.db.get_value("Relay Thread", thread.name, "last_message_at")),
 			get_datetime(landed[0].creation),
 			"the rule's write regressed the stamp of the inbound that landed mid-apply",
+		)
+
+	# --- #25: a claimed inbound gets no rule ------------------------------
+
+	def test_a_message_an_integration_claimed_gets_no_rule_and_no_reply(self):
+		"""#25: an inbound another integration has fully handled gets no
+		auto-reply rule at all -- no reply, no thread move, no tags.
+
+		rxflow answers a refill reminder inside the inbound's insert
+		transaction and claims the message there; relay commits before it
+		classifies, so the claim is on the ROW by then -- the caller's
+		message object predates the write and must not be trusted. This
+		test replays that order (insert, claim on the row, classify) with
+		the REAL send path: a rule firing is what it exists to forbid.
+		"""
+		message, held = self._inbound("REFILL")
+		frappe.db.set_value("Relay Message", message.name, "handled_by", "rxflow")
+
+		with patch("frappe.db.commit"):
+			result = classify_message(message, held, self.contact)
+
+		self.assertFalse(
+			result.matched,
+			"a rule matched a message another integration had claimed",
+		)
+		self.assertEqual(
+			frappe.db.count("Relay Message", {"contact": self.contact.name, "direction": "Outgoing"}),
+			0,
+			"the claimed message got an auto-reply anyway",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", message.thread, "status"),
+			"Open",
+			"the claimed message's thread was moved anyway",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", message.thread, "tags") or "",
+			"",
+			"the claimed message's thread was tagged anyway",
+		)
+
+	def test_a_claimed_message_does_not_reach_the_fallback_rule(self):
+		"""#25: the Fallback matches everything unmatched, so it is the rule
+		a claimed message is most likely to reach -- and its text is a lie
+		when the message WAS understood: a patient's refill confirmation
+		"YES" was acted on, and the fallback said "Sorry, we didn't
+		understand". The claim must silence the fallback too.
+		"""
+		message, held = self._inbound("xyzzy")
+		frappe.db.set_value("Relay Message", message.name, "handled_by", "rxflow")
+
+		with patch("frappe.db.commit"):
+			result = classify_message(message, held, self.contact)
+
+		self.assertFalse(
+			result.matched,
+			"the fallback matched a message another integration had claimed",
+		)
+		self.assertEqual(
+			frappe.db.count("Relay Message", {"contact": self.contact.name, "direction": "Outgoing"}),
+			0,
+			"the Fallback replied to a claimed message anyway",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", message.thread, "status"),
+			"Open",
+			"the Fallback moved a claimed message's thread anyway",
+		)
+
+	def test_an_unclaimed_message_still_gets_its_rule(self):
+		"""#25 PIN, the negative control: without a claim nothing changes --
+		the Refill rule replies, moves the thread to Awaiting Agent and
+		tags it, exactly as before the claim contract existed. If this
+		fails, the gate over-fired and standalone relay regressed.
+		"""
+		message, held = self._inbound("REFILL")
+
+		with patch("frappe.db.commit"):
+			result = classify_message(message, held, self.contact)
+
+		self.assertTrue(result.matched, "no rule matched an unclaimed refill at all")
+		self.assertEqual(
+			frappe.db.count("Relay Message", {"contact": self.contact.name, "direction": "Outgoing"}),
+			1,
+			"the unclaimed refill's reply count changed -- the gate over-fired",
+		)
+		self.assertEqual(
+			frappe.db.get_value("Relay Thread", message.thread, "status"),
+			"Awaiting Agent",
+			"the unclaimed refill's thread move changed",
+		)
+		self.assertIn(
+			"refill",
+			frappe.db.get_value("Relay Thread", message.thread, "tags") or "",
+			"the unclaimed refill's tag changed",
 		)
 
 	# --- #22: the reply stays on the conversation's thread and account ----
