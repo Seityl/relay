@@ -72,6 +72,16 @@ class TestRelayMessage(IntegrationTestCase):
 			}
 		).insert(ignore_permissions=True)
 
+	def test_the_relay_message_carries_a_handled_by_field(self):
+		"""#25 PIN: the claim contract's field exists, is a read-only Data
+		field, and its description states the contract. Green by design
+		after the schema lands; it guards against accidental removal."""
+		field = frappe.get_meta("Relay Message").get_field("handled_by")
+
+		self.assertIsNotNone(field, "the Relay Message claim field handled_by is gone")
+		self.assertEqual(field.fieldtype, "Data", "handled_by must stay a Data field")
+		self.assertTrue(field.read_only, "handled_by must be read-only on the desk")
+
 	def test_a_reply_pinned_to_a_thread_from_another_contact_is_refused(self):
 		"""#22: pinning a message to a thread that belongs to someone else
 		is refused, naming the thread and both contacts."""
