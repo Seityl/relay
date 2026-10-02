@@ -16,8 +16,11 @@ import hmac
 import json
 import pathlib
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import frappe
+import requests
+from relay.integrations.base_adapter import PermanentRejection
 from relay.integrations.twilio_adapter import STATUS_MAP, TwilioAdapter
 
 AUTH_TOKEN = "test-auth-token"
@@ -422,3 +425,86 @@ class TestTwilioAdapter(unittest.TestCase):
 			message = self.adapter.parse_inbound_webhook(payload).messages[0]
 
 		self.assertEqual(message.content_type, "document")
+
+
+class _SendResponse:
+	"""A fake requests response for the send path."""
+
+	def __init__(self, status_code, payload):
+		self.status_code = status_code
+		self._payload = payload
+		self.text = json.dumps(payload)
+
+	def json(self):
+		return self._payload
+
+	def raise_for_status(self):
+		if self.status_code >= 400:
+			raise requests.HTTPError(f"{self.status_code} Client Error", response=self)
+
+
+class TestTwilioSendRefusals(unittest.TestCase):
+	"""Provider refusals the retry backoff can never fix (Seityl/relay#7).
+
+	Every code below is read from Twilio's own error-codes pages, and each
+	is a property of the request or the account, not of the moment:
+	retrying bills a call whose outcome cannot change.
+	"""
+
+	#: https://www.twilio.com/docs/api/errors/{code}
+	DOCUMENTED_PERMANENT = {
+		20003: "Permission Denied (credentials, or the Primary Compliance Profile gate)",
+		21211: "Invalid 'To' Phone Number (not E.164)",
+		63016: "Outside messaging window; use a Message Template instead",
+		21608: "unverified recipient on a trial / compliance-gated account",
+		21610: "recipient unsubscribed (replied STOP)",
+	}
+
+	def setUp(self):
+		self.adapter = TwilioAdapter(_Account())
+		self.queue_doc = MagicMock(
+			message_type="Freeform",
+			content_type="text",
+			message_body="hello",
+			media_url="",
+			template="",
+			template_parameters="",
+			interactive_payload="",
+			contact="contact-hash",
+		)
+
+	def _send_with(self, response):
+		with (
+			patch.object(TwilioAdapter, "_resolve_recipient", return_value="whatsapp:+15550001111"),
+			patch.object(TwilioAdapter, "_callback_url", return_value="https://rxflow-dev.jollys.dm/cb"),
+			patch("relay.integrations.twilio_adapter.requests.post", return_value=response),
+			patch("frappe.log_error"),
+		):
+			return self.adapter.send(self.queue_doc)
+
+	def test_every_documented_deterministic_twilio_code_is_a_permanent_rejection(self):
+		for code, meaning in self.DOCUMENTED_PERMANENT.items():
+			with self.subTest(code=code, meaning=meaning):
+				with self.assertRaises(PermanentRejection) as refused:
+					self._send_with(_SendResponse(400, {"code": code, "message": meaning}))
+				self.assertIn(str(code), str(refused.exception))
+				self.assertIn(meaning, str(refused.exception))
+
+	def test_an_unmapped_twilio_code_still_rides_the_backoff(self):
+		"""Not every refusal is deterministic: an unmapped code keeps the
+		behaviour the queue already has -- a plain ValidationError it retries."""
+		with self.assertRaises(frappe.ValidationError) as raised:
+			self._send_with(_SendResponse(400, {"code": 12345, "message": "mystery"}))
+		self.assertNotIsInstance(raised.exception, PermanentRejection)
+
+	def test_a_transport_failure_is_not_a_refusal(self):
+		"""'Could not reach Twilio' is a moment, not a verdict."""
+		with (
+			patch.object(TwilioAdapter, "_resolve_recipient", return_value="whatsapp:+15550001111"),
+			patch.object(TwilioAdapter, "_callback_url", return_value="https://rxflow-dev.jollys.dm/cb"),
+			patch("relay.integrations.twilio_adapter.requests.post", side_effect=requests.ConnectionError("down")),
+			patch("frappe.log_error"),
+		):
+			with self.assertRaises(frappe.ValidationError) as raised:
+				self.adapter.send(self.queue_doc)
+		self.assertNotIsInstance(raised.exception, PermanentRejection)

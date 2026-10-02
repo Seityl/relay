@@ -19,10 +19,33 @@ from relay.integrations.base_adapter import (
 	InboundMessage,
 	InboundPayload,
 	NormalizedRecipient,
+	PermanentRejection,
 	StatusEvent,
 	TemplateStatusEvent,
 )
 from relay.integrations.registry import register
+
+#: Meta error codes whose refusal is a property of the request or the
+#: account, not of the moment (Seityl/relay#7). Each is read from Meta's own
+#: error-codes page
+#: (https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes):
+#: - 131047 more than 24 hours have passed since the recipient last replied
+#:   (the provider-side twin of the pre-queue window check; the page's own
+#:   remedy is "send a template message instead").
+#: - 130403 the recipient has blocked this business; the page says not to
+#:   repeat the attempt.
+#: - 131050 the recipient opted out of marketing messages; the page says not
+#:   to try again.
+#: - 131026 message undeliverable -- not a WhatsApp number, terms not
+#:   accepted, or the client needs upgrading; the remedy is the user's.
+#:
+#: Deliberately NOT here: Meta's throttle family (4, 80007, 130429, 131048,
+#: 131056) which the page documents as retryable, 131049 whose remedy is a
+#: 24-hour wait the backoff cannot express, and the request-bug family
+#: (100, 131005, 131008, 131009, 131021, 131051, 33, ...) which means relay
+#: built a bad payload -- those stay transient until a decision says
+#: otherwise, and the choice is recorded in the PR for #7.
+META_PERMANENT_CODES = frozenset({131047, 130403, 131050, 131026})
 
 #: Meta's `message_template_status_update` events -> Relay Template statuses
 #: (relay_template.json). None means the event says nothing about whether the
@@ -45,6 +68,18 @@ TEMPLATE_STATUS_MAP = {
 	"LOCKED": None,  # cannot be edited; says nothing about sending
 	"UNARCHIVED": None,  # back to whatever it was; Meta does not say what
 }
+
+
+def _meta_error_body(response) -> dict:
+	"""Meta's error object ({message, type, code, ...}); {} if not one.
+
+	Meta's errors arrive as `{"error": {...}}`; a body that is not JSON or
+	not shaped so is simply not classified and keeps the queue's backoff.
+	"""
+	try:
+		return response.json().get("error") or {}
+	except (ValueError, AttributeError):
+		return {}
 
 
 class MetaCloudAPIAdapter(BaseChannelAdapter):
@@ -76,7 +111,9 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 		else:
 			payload = self._build_freeform_payload(phone, queue_doc)
 
-		response = self._post(f"{self.phone_id}/messages", payload)
+		response = self._post(
+			f"{self.phone_id}/messages", payload, permanent_codes=META_PERMANENT_CODES
+		)
 		return response["messages"][0]["id"]
 
 	def _resolve_recipient(self, contact_name: str) -> str:
@@ -163,13 +200,25 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 			"interactive": payload,
 		}
 
-	def _post(self, path: str, payload: dict) -> dict:
+	def _post(self, path: str, payload: dict, permanent_codes: frozenset | None = None) -> dict:
 		url = self._url(path)
 		response = requests.post(url, headers=self._headers(), json=payload, timeout=60)
 		try:
 			response.raise_for_status()
 		except requests.HTTPError as e:
 			frappe.log_error(title="Relay Meta API Error", message=response.text)
+			# #7: classification is scoped to SENDS. `mark_read` shares this
+			# method and passes no codes, so a failed read-receipt is never
+			# mistaken for a refused message.
+			if permanent_codes:
+				error = _meta_error_body(response)
+				code = error.get("code")
+				if code in permanent_codes:
+					raise PermanentRejection(
+						_("Meta refused the message ({0}): {1}").format(
+							code, error.get("message") or response.text
+						)
+					)
 			frappe.throw(_("Failed to send message: {0}").format(response.text))
 		return response.json()
 
