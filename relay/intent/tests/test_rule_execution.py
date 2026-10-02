@@ -1,7 +1,8 @@
 # Copyright (c) 2026, Jeriel Francis (trading as Seityl) and contributors
 # For license information, please see license.txt
 
-"""A matched rule is actually applied to the thread (#9).
+"""A matched rule is actually applied to the thread (#9), and the write
+survives overlapping inbounds (#22).
 
 `classify_message` raised on every single inbound message, and the caller
 swallows it:
@@ -21,7 +22,7 @@ WhatsApp message:
 
 Ten milliseconds apart, and both writes are relay's own. The handler loads
 the thread, inserts the message, and `RelayMessage.after_insert` immediately
-re-saves that same thread through a *different* object:
+writes that same thread's row through a *different* object:
 
     thread = frappe.get_doc("Relay Thread", self.thread)
     thread.update_timestamps(self.creation, self.direction)
@@ -34,6 +35,14 @@ What was lost each time, in `_execute_rule` order: the thread status the rule
 sets, the assignment, the tags, the automated reply, and -- because
 `process_stop_request` runs *after* the save that raised -- the opt-out. A
 customer replying STOP was never unsubscribed, silently.
+
+#9 fixed the collision by reloading before the rule's save. #22 went further:
+the inbound's thread write and the rule's thread write are now targeted
+writes (an atomic UPDATE and a db.set_value) with no optimistic locking, so
+an inbound landing while a rule applies neither raises nor regresses the
+counters. The copy the caller holds is still stale in field values -- that
+premise is pinned by
+test_the_thread_the_caller_holds_is_stale_once_the_message_is_inserted.
 """
 
 from unittest.mock import patch

@@ -172,10 +172,16 @@ def get_messages(
 
 @frappe.whitelist()
 def mark_thread_read(thread: str) -> dict:
-	"""Reset unread count on a thread."""
+	"""Reset unread count on a thread.
+
+	One column, not the whole document (Seityl/relay#22): this runs on every
+	thread open, and a whole-document save here either collided with an
+	inbound landing mid-request (TimestampMismatchError, a 500 to the desk)
+	or wrote the fetched copy's stamps back over the inbound's. set_value
+	touches only unread_count.
+	"""
 	thread_doc = frappe.get_doc("Relay Thread", thread)
-	thread_doc.unread_count = 0
-	thread_doc.save(ignore_permissions=True)
+	frappe.db.set_value("Relay Thread", thread_doc.name, "unread_count", 0)
 	return {"success": True}
 
 
