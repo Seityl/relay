@@ -147,7 +147,15 @@ def send_auto_reply(
     response_subject: str = "",
     response_body: str = "",
 ) -> dict:
-    """Send an automated reply to the contact."""
+    """Send an automated reply to the contact.
+
+    The reply goes out on the ACCOUNT the conversation is on (the inbound's
+    account), not the default outgoing account: WhatsApp's session belongs
+    to (customer, business number), and a reply through another number can
+    be refused out of window. The reply is pinned to the inbound's thread so
+    a rule that just moved that thread (Stop -> Closed) does not have its
+    goodbye open a fresh one (Seityl/relay#22).
+    """
     contact_doc = _get_contact(message_doc.contact)
     identifier = contact_doc.get_primary_identifier()
     if not identifier:
@@ -160,6 +168,8 @@ def send_auto_reply(
             template=template,
             reference_doctype="Relay Message",
             reference_name=message_doc.name,
+            account=message_doc.account,
+            thread=message_doc.thread,
         )
 
     if response_type == "Freeform":
@@ -176,6 +186,8 @@ def send_auto_reply(
             html_body=response_body or "",
             reference_doctype="Relay Message",
             reference_name=message_doc.name,
+            account=message_doc.account,
+            thread=message_doc.thread,
         )
 
     return {"success": False, "error": "No response configured"}
@@ -259,31 +271,37 @@ def _execute_rule(rule, message_doc, thread_doc, contact_doc) -> IntentResult:
 
     # Apply thread-level actions (status, assignment, tags)
     if thread_doc:
-        # The caller's copy is stale, and not occasionally: the same message
-        # insert that triggers classification also re-saves this thread,
-        # through a separate object, in RelayMessage.after_insert. So every
-        # inbound message arrived here holding an out-of-date thread and the
-        # save below raised TimestampMismatchError -- swallowed by the
-        # handler, which is why it went unnoticed from July until #9.
-        #
-        # Reloading discards nothing: no caller mutates the thread between
-        # loading it and calling classify_message. The premise is pinned by
-        # test_the_thread_the_caller_holds_is_stale_once_the_message_is_inserted,
-        # so if after_insert ever stops re-saving, that test fails and this
-        # reload can be removed deliberately rather than left as cargo.
+        # The caller's copy is stale in field values, and not occasionally:
+        # the same message insert that triggers classification also writes
+        # this thread's row, through a separate object, in
+        # RelayMessage.after_insert (Seityl/relay#22). The reload gives the
+        # tag merge and the change gate below the row's current values. Rule
+        # CONDITIONS were evaluated earlier, against the caller's copy, and
+        # see pre-write values -- today as always; do not rely on them for
+        # unread/last_* state.
         thread_doc.reload()
 
-        if rule.set_thread_status:
-            thread_doc.status = rule.set_thread_status
-        if rule.assign_to:
-            thread_doc.assigned_to = rule.assign_to
+        values = {}
+        if rule.set_thread_status and thread_doc.status != rule.set_thread_status:
+            values["status"] = rule.set_thread_status
+        if rule.assign_to and thread_doc.assigned_to != rule.assign_to:
+            values["assigned_to"] = rule.assign_to
         if rule.add_tags:
             tags = [t.strip() for t in (rule.add_tags or "").split(",") if t.strip()]
             existing = {t.strip() for t in (thread_doc.get("tags") or "").split(",") if t.strip()}
             existing.update(tags)
-            thread_doc.tags = ", ".join(sorted(existing))
-        if thread_doc.has_value_changed("status") or thread_doc.has_value_changed("assigned_to") or thread_doc.has_value_changed("tags"):
-            thread_doc.save(ignore_permissions=True)
+            merged = ", ".join(sorted(existing))
+            if merged != (thread_doc.tags or ""):
+                values["tags"] = merged
+        if values:
+            # Targeted write (Seityl/relay#22): a whole-document save here
+            # either collided with an inbound landing in the same window --
+            # raised, swallowed by the handler, rule lost -- or wrote this
+            # copy's counters back over a newer inbound's. set_value touches
+            # only these columns and takes no optimistic lock. Note it does
+            # not write a Version row: the durable traces of a rule's move
+            # are the consent log (opt-outs) and the message history.
+            frappe.db.set_value("Relay Thread", thread_doc.name, values)
 
     # Send automated response
     if rule.response_type and rule.response_type != "None":

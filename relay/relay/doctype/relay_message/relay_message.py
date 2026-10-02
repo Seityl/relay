@@ -4,6 +4,7 @@
 """Relay Message controller."""
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 from relay.compliance.consent import check_can_send
@@ -51,6 +52,7 @@ def send_message(
 	template_parameters: dict | None = None,
 	content_type: str = "text",
 	account: str = "",
+	thread: str = "",
 	reference_doctype: str = "",
 	reference_name: str = "",
 	interactive_payload: dict | None = None,
@@ -59,6 +61,11 @@ def send_message(
 	"""Create an outgoing message and queue it for delivery.
 
 	Either `message_body` (free-form) or `template` must be provided.
+
+	`thread` pins the message to an existing conversation (used by the
+	auto-reply engine so a rule's reply lands on the thread it answers).
+	It is an ownership boundary: a message may only be pinned to a thread
+	that belongs to the recipient's contact and to the sending account.
 	"""
 	# Backward compatibility: legacy phone_number parameter
 	if phone_number and not recipient_value:
@@ -80,7 +87,20 @@ def send_message(
 		if not account:
 			frappe.throw("No default outgoing account configured")
 
-	thread = RelayThread.get_or_create(contact.name, account)
+	if thread:
+		thread_doc = frappe.get_doc("Relay Thread", thread)
+		if thread_doc.contact != contact.name:
+			frappe.throw(
+				_("Thread {0} belongs to contact {1}, so a message for {2} cannot be sent on it")
+				.format(thread, thread_doc.contact, contact.name)
+			)
+		if thread_doc.account and thread_doc.account != account:
+			frappe.throw(
+				_("Thread {0} is on account {1}, so a message via {2} cannot be sent on it")
+				.format(thread, thread_doc.account, account)
+			)
+	else:
+		thread_doc = RelayThread.get_or_create(contact.name, account)
 
 	message_type = "Freeform"
 	if template:
@@ -97,7 +117,7 @@ def send_message(
 	doc = frappe.get_doc(
 		{
 			"doctype": "Relay Message",
-			"thread": thread.name,
+			"thread": thread_doc.name,
 			"contact": contact.name,
 			"account": account,
 			"direction": "Outgoing",
@@ -134,5 +154,5 @@ def send_message(
 	return {
 		"success": True,
 		"message_id": doc.name,
-		"thread_id": thread.name,
+		"thread_id": thread_doc.name,
 	}

@@ -79,11 +79,12 @@ class TestMarkThreadRead(IntegrationTestCase):
 		landed = []
 		state = {"done": False}
 
-		def get_doc_then_inbound_lands(doctype, name=None, *args, **kwargs):
-			doc = real_get_doc(doctype, name, *args, **kwargs)
+		def get_doc_then_inbound_lands(*args, **kwargs):
+			doc = real_get_doc(*args, **kwargs)
 			if (
-				doctype == "Relay Thread"
-				and name == thread.name
+				len(args) >= 2
+				and args[0] == "Relay Thread"
+				and args[1] == thread.name
 				and not state["done"]
 			):
 				state["done"] = True
