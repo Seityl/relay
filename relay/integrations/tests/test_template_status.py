@@ -365,16 +365,27 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 
 		self.assertEqual(self._status(template), "Approved")
 
-	def test_a_meta_event_moves_only_the_template_with_that_exact_id(self):
-		# Above 2**53 a number compared with text in SQL is compared as a
-		# float, and these two ids are the same float.
-		target = self._template(META_CHANNEL, "Pending", "18014398509481985")
-		neighbour = self._template(META_CHANNEL, "Pending", "18014398509481984")
+	def test_a_meta_template_id_reaches_relay_as_text(self):
+		# Meta sends a number; Relay Template.provider_template_id is Data and
+		# TemplateStatusEvent says str. (MariaDB 10.11 happens to compare the
+		# number with the text exactly; the contract should not rest on that.)
+		adapter = get_adapter("Meta Cloud API", self.meta_account)
+		payload = {
+			"entry": [
+				{
+					"changes": [
+						{
+							"field": "message_template_status_update",
+							"value": {"event": "APPROVED", "message_template_id": 1689556908129832},
+						}
+					]
+				}
+			]
+		}
 
-		self._meta_webhook(18014398509481985, "APPROVED")
+		event = adapter.parse_inbound_webhook(payload).template_status_events[0]
 
-		self.assertEqual(self._status(target), "Approved")
-		self.assertEqual(self._status(neighbour), "Pending")
+		self.assertEqual(event.provider_template_id, "1689556908129832")
 
 	def test_a_flagged_meta_template_stays_approved(self):
 		template = self._template(META_CHANNEL, "Approved", "1689556908129833")
