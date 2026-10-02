@@ -410,7 +410,40 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 
 		self.assertEqual(self._status(fine), "Approved")
 		self.assertEqual(self._status(broken), "Pending")
-		self.assertIn(broken.name, " ".join(str(c) for c in log_error.call_args_list))
+		# In the title, not only somewhere in a traceback.
+		self.assertIn(
+			f"Relay Template Status Not Applied: {broken.name}",
+			[c.kwargs.get("title") for c in log_error.call_args_list],
+		)
+
+	def test_a_template_that_fails_after_writing_leaves_none_of_its_writes(self):
+		from relay.relay.doctype.relay_template.relay_template import RelayTemplate
+
+		broken = self._template(META_CHANNEL, "Pending", "1689556908129836")
+
+		def write_then_fail(doc, *args, **kwargs):
+			frappe.get_doc(
+				{
+					"doctype": "Comment",
+					"comment_type": "Comment",
+					"reference_doctype": "Relay Template",
+					"reference_name": doc.name,
+					"content": "partial write",
+				}
+			).insert(ignore_permissions=True)
+			raise frappe.ValidationError("refused after writing")
+
+		with patch.object(RelayTemplate, "on_update", write_then_fail, create=True):
+			self._meta_webhook(1689556908129836, "APPROVED")
+
+		self.assertEqual(self._status(broken), "Pending")
+		self.assertFalse(
+			frappe.db.exists(
+				"Comment",
+				{"reference_doctype": "Relay Template", "reference_name": broken.name, "content": "partial write"},
+			),
+			f"{broken.name} failed but kept a write it made before failing",
+		)
 
 	def test_a_flagged_meta_template_stays_approved(self):
 		template = self._template(META_CHANNEL, "Approved", "1689556908129833")
