@@ -41,7 +41,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Queued\nPending\nSent\nFailed\nCancelled",
+    "options": "Queued\nPending\nSent\nFailed\nRefused\nCancelled",
    "reqd": 1
   },
   {
@@ -198,7 +198,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 19:21:46.814290",
+ "modified": "2026-10-02 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Relay",
  "name": "Relay Outbound Queue",
@@ -265,6 +265,10 @@
   },
   {
    "title": "Failed",
+   "color": "red"
+  },
+  {
+   "title": "Refused",
    "color": "red"
   },
   {
