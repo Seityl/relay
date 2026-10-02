@@ -163,12 +163,17 @@ def send_auto_reply(
         )
 
     if response_type == "Freeform":
+        # Coerce the rule's empty fields to real strings: send_message is
+        # whitelisted, and Frappe v16 type-validates whitelisted calls in
+        # requests and tests alike, so a rule without response_subject
+        # crashed the whole classification -- the reply was lost and, for
+        # Stop, the opt-out never ran (Seityl/relay#22).
         return send_message(
             recipient_type=identifier.identifier_type,
             recipient_value=identifier.identifier_value,
-            subject=response_subject,
-            message_body=_strip_html(response_body) or response_body,
-            html_body=response_body,
+            subject=response_subject or "",
+            message_body=_strip_html(response_body) or (response_body or ""),
+            html_body=response_body or "",
             reference_doctype="Relay Message",
             reference_name=message_doc.name,
         )
