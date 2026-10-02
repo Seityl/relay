@@ -387,6 +387,31 @@ class TestTemplateStatusFollowsTheProvider(IntegrationTestCase):
 
 		self.assertEqual(event.provider_template_id, "1689556908129832")
 
+	def test_a_status_moves_only_the_template_with_exactly_that_id(self):
+		# The column's collation is case- and trailing-space-insensitive
+		# (utf8mb4_unicode_ci); a provider id is neither.
+		target = self._template(META_CHANNEL, "Pending", "abcDEF123")
+		other_case = self._template(META_CHANNEL, "Pending", "ABCdef123")
+		trailing_space = self._template(META_CHANNEL, "Pending", "abcDEF123 ")
+
+		self._meta_webhook("abcDEF123", "APPROVED")
+
+		self.assertEqual(self._status(target), "Approved")
+		self.assertEqual(self._status(other_case), "Pending")
+		self.assertEqual(self._status(trailing_space), "Pending")
+
+	def test_a_template_that_cannot_be_saved_does_not_stop_the_others_and_is_named(self):
+		# Two languages of one Meta template share its id.
+		broken = self._template(META_CHANNEL, "Pending", "1689556908129835")
+		fine = self._template(META_CHANNEL, "Pending", "1689556908129835")
+		frappe.db.set_value("Relay Template", broken.name, "body_text", "")
+
+		log_error = self._meta_webhook(1689556908129835, "APPROVED")
+
+		self.assertEqual(self._status(fine), "Approved")
+		self.assertEqual(self._status(broken), "Pending")
+		self.assertIn(broken.name, " ".join(str(c) for c in log_error.call_args_list))
+
 	def test_a_flagged_meta_template_stays_approved(self):
 		template = self._template(META_CHANNEL, "Approved", "1689556908129833")
 
