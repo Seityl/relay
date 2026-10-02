@@ -19,21 +19,37 @@ def apply_template_status(event: TemplateStatusEvent) -> list[str]:
 	"""Set the status on every Relay Template with this provider id.
 
 	Returns the names whose status changed. An event with no status is one
-	the adapter chose not to act on, and changes nothing.
+	the adapter chose not to act on, and changes nothing. A template that
+	cannot be saved is logged under its name and does not stop the others --
+	on the webhook path it would otherwise fail every event in the payload.
 	"""
 	if not event.provider_template_id or not event.status:
 		return []
 
 	changed = []
-	for name in frappe.get_all(
-		"Relay Template", filters={"provider_template_id": event.provider_template_id}, pluck="name"
+	for row in frappe.get_all(
+		"Relay Template",
+		filters={"provider_template_id": event.provider_template_id},
+		fields=["name", "provider_template_id"],
 	):
-		doc = frappe.get_doc("Relay Template", name)
+		# The column's collation ignores case and trailing spaces; an id does not.
+		if row.provider_template_id != event.provider_template_id:
+			continue
+		doc = frappe.get_doc("Relay Template", row.name)
 		if doc.status == event.status:
 			continue
-		doc.status = event.status
-		doc.save(ignore_permissions=True)
-		changed.append(name)
+		frappe.db.savepoint("template_status_apply")
+		try:
+			doc.status = event.status
+			doc.save(ignore_permissions=True)
+		except Exception:
+			frappe.db.rollback(save_point="template_status_apply")
+			frappe.log_error(
+				title=f"Relay Template Status Not Applied: {row.name}",
+				message=frappe.get_traceback(),
+			)
+			continue
+		changed.append(row.name)
 	return changed
 
 
