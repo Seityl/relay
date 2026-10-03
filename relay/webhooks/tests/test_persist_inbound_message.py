@@ -214,8 +214,14 @@ class TestAnUndecodableImageAttachment(IntegrationTestCase):
 		doc = frappe.get_doc("Relay Message", name)
 		self.assertEqual(len(doc.attachments), 1, "the attachment row was not kept")
 		self.assertEqual(self._webhook_log_status(media_id), "Processed")
+		# The call THIS guard makes: the seeded Fallback rule also logs an
+		# error naming the message (its reply cannot send on the fixture's
+		# fake token), so matching any reference_name would pass for the
+		# wrong reason — M3 survived exactly that way before the title was
+		# pinned to this guard's own call.
 		named = [c for c in self.log_error.call_args_list
-				 if c.kwargs.get("reference_name") == name]
+				 if c.kwargs.get("reference_name") == name
+				 and str(c.kwargs.get("title", "")).startswith("Relay could not store attachment")]
 		self.assertTrue(
 			named,
 			f"the unstorable attachment was not logged naming the message: {self.log_error.call_args_list}",
