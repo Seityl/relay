@@ -300,15 +300,39 @@ def _persist_inbound_message(message: InboundMessage, account_name: str):
         file_doc = None
         if attachment.content:
             file_name = attachment.file_name or f"{frappe.generate_hash(length=10)}.bin"
-            file_doc = frappe.get_doc(
-                {
-                    "doctype": "File",
-                    "file_name": file_name,
-                    "attached_to_doctype": "Relay Message",
-                    "attached_to_name": msg_doc.name,
-                    "content": attachment.content,
-                }
-            ).save(ignore_permissions=True)
+            try:
+                file_doc = frappe.get_doc(
+                    {
+                        "doctype": "File",
+                        "file_name": file_name,
+                        "attached_to_doctype": "Relay Message",
+                        "attached_to_name": msg_doc.name,
+                        "content": attachment.content,
+                    }
+                ).save(ignore_permissions=True)
+            except Exception as e:
+                # An attachment whose bytes arrived but cannot be stored must not
+                # kill the persist (#28). The realistic trigger: frappe's EXIF
+                # strip decodes image content when
+                # strip_exif_metadata_from_uploaded_images is on (frappe
+                # file.py:821-826; the content type is guessed from the file's
+                # NAME, so a Meta document message named "prescription.jpg"
+                # strips) and PIL raises OSError "Truncated File Read" on bytes
+                # it cannot decode. The message insert is not committed until
+                # below, so a raise here reached _handle_post's except, which
+                # ROLLED THE PERSIST BACK and answered 500 -- the provider's
+                # retry re-persisted the same payload into the same refusal, and
+                # every message in the batch was lost with it. The fallback is
+                # the shape a download FAILURE already produces: the child row
+                # keeps the provider URL (twilio_adapter._download returns b""
+                # and handler.py stores it), no File row is made.
+                frappe.log_error(
+                    title=f"Relay could not store attachment {file_name} of message {msg_doc.name}",
+                    message=frappe.get_traceback(),
+                    reference_doctype="Relay Message",
+                    reference_name=msg_doc.name,
+                )
+                file_doc = None
 
         msg_doc.append(
             "attachments",
