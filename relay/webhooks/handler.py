@@ -73,6 +73,7 @@ def _handle_post() -> Response:
     _log.insert(ignore_permissions=True)
 
     ack = None
+    failure_recorded = False
     try:
         account_name = _resolve_account_from_payload(payload)
         _log.account = account_name
@@ -106,14 +107,38 @@ def _handle_post() -> Response:
         _log.status = "Processed"
         _log.processed_at = frappe.utils.now()
     except Exception:
-        _log.status = "Failed"
-        _log.error_log = frappe.get_traceback()
+        # The Webhook Log row was inserted inside this transaction; the
+        # rollback below discards that insert. Saving the stale `_log` here
+        # raised DoesNotExistError (#30): the failure escaped as a secondary
+        # error, the provider saw an uncontrolled 500, and no Failed record
+        # ever landed. Roll the data back first, then record the failure in
+        # a FRESH row carrying what the original row had.
+        error_log = frappe.get_traceback()
         frappe.db.rollback()
-        _log.save(ignore_permissions=True)
+        fresh = frappe.get_doc(
+            {
+                "doctype": "Relay Webhook Log",
+                "event_type": _detect_event_type(payload),
+                "payload": json.dumps(payload),
+                "headers": json.dumps(_safe_headers(headers)),
+                "status": "Failed",
+                "error_log": error_log,
+            }
+        )
+        fresh.insert(ignore_permissions=True)
         frappe.db.commit()
+        frappe.log_error(
+            title="Relay webhook processing failed",
+            message=error_log,
+            reference_doctype="Relay Webhook Log",
+            reference_name=fresh.name,
+        )
+        failure_recorded = True
         return Response("Internal server error", status=500)
     finally:
-        if _log.has_value_changed("status") or _log.has_value_changed("error_log"):
+        if not failure_recorded and (
+            _log.has_value_changed("status") or _log.has_value_changed("error_log")
+        ):
             _log.save(ignore_permissions=True)
             frappe.db.commit()
 
