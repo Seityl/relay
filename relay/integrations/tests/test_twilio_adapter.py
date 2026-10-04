@@ -24,7 +24,7 @@ from relay.integrations.base_adapter import PermanentRejection
 from relay.integrations.twilio_adapter import STATUS_MAP, TwilioAdapter
 
 AUTH_TOKEN = "test-auth-token"
-ORIGIN = "https://rxflow-dev.jollys.dm"
+ORIGIN = "https://relay.example"
 PATH = "/api/method/relay.webhooks.handler.receive"
 
 APP_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -106,6 +106,12 @@ def _relay_message_statuses() -> set:
 class TestTwilioAdapter(unittest.TestCase):
 	def setUp(self):
 		self.adapter = TwilioAdapter(_Account())
+		# log_error commits; these tests run against relay.test without a
+		# transaction wrapper, so its rows would leak. The tests assert on
+		# the captured calls.
+		log_error = patch("frappe.log_error")
+		self.log_error = log_error.start()
+		self.addCleanup(log_error.stop)
 
 	# --- addresses -------------------------------------------------------
 
@@ -196,24 +202,24 @@ class TestTwilioAdapter(unittest.TestCase):
 	def test_the_signed_url_survives_a_proxy_that_rewrites_host_and_scheme(self):
 		"""Captured from the proxy in front of this deployment.
 
-		    Host                 10.6.0.35
+		    Host                 198.51.100.35
 		    X-Forwarded-Proto    http
 
-		so `request.url` is `http://10.6.0.35/...` while Twilio signed
-		`https://rxflow-dev.jollys.dm/...`. Repairing the received URL cannot
+		so `request.url` is `http://198.51.100.35/...` while Twilio signed
+		`https://relay.example/...`. Repairing the received URL cannot
 		work -- both the scheme and the host are wrong. The URL Twilio signed
 		is the one we configured, so it is rebuilt from the site origin.
 		"""
-		public = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive?account=Twilio-WhatsApp"
+		public = "https://relay.example/api/method/relay.webhooks.handler.receive?account=Twilio-WhatsApp"
 		as_received = _Request(
-			url="http://10.6.0.35/api/method/relay.webhooks.handler.receive?account=Twilio-WhatsApp",
+			url="http://198.51.100.35/api/method/relay.webhooks.handler.receive?account=Twilio-WhatsApp",
 			form=REAL_INBOUND,
-			headers={"Host": "10.6.0.35", "X-Forwarded-Proto": "http"},
+			headers={"Host": "198.51.100.35", "X-Forwarded-Proto": "http"},
 			path="/api/method/relay.webhooks.handler.receive",
 			query_string=b"account=Twilio-WhatsApp",
 		)
 
-		with patch("frappe.utils.get_url", return_value="https://rxflow-dev.jollys.dm"):
+		with patch("frappe.utils.get_url", return_value="https://relay.example"):
 			self.assertEqual(self.adapter._signed_url(as_received), public)
 
 			with patch("frappe.request", as_received):
@@ -265,8 +271,51 @@ class TestTwilioAdapter(unittest.TestCase):
 		self.assertEqual(self.adapter.map_status("undelivered"), "Failed")
 		self.assertEqual(self.adapter.map_status("failed"), "Failed")
 
-	def test_an_unknown_status_is_passed_through_rather_than_guessed(self):
-		self.assertEqual(self.adapter.map_status("something-new"), "something-new")
+	def test_a_partially_delivered_receipt_is_stored_as_sent(self):
+		"""#13 item 1: Twilio's documented `partially_delivered` passed
+		through unmapped into a Select that has no such option and raised
+		ValidationError mid-webhook (500, Twilio retries, the batch lost).
+		It maps to Sent: the message left; Delivered would overclaim,
+		Failed would lie."""
+		self.assertEqual(self.adapter.map_status("partially_delivered"), "Sent")
+
+	def test_an_unknown_status_is_skipped_and_named_not_guessed(self):
+		"""#13 item 1: the pass-through default wrote provider vocabulary
+		straight into a Select. An unknown status now maps to None: the
+		parser skips the event and names it in the Error Log."""
+		self.assertIsNone(self.adapter.map_status("something-new"))
+		event = self.adapter._parse_status(
+			{"MessageSid": "SM-unknown-status", "MessageStatus": "something-new"}
+		)
+		self.assertIsNone(event, "an unmappable status was parsed into an event")
+		named = [c for c in self.log_error.call_args_list if "something-new" in str(c.kwargs.get("title", ""))]
+		self.assertTrue(
+			named,
+			f"the skipped status was not named: {self.log_error.call_args_list}",
+		)
+
+	# --- the signing origin ----------------------------------------------
+
+	def test_a_signature_check_without_host_name_names_the_config_gap(self):
+		"""#13 item 3: with `host_name` unset, the origin Twilio signed is
+		rebuilt from the request's own Host header -- so a proxy rewrite
+		presents as a bad Auth Token and nobody is told why. The
+		misconfiguration is named in the Error Log."""
+		self.adapter._signed_url(
+			type("_R", (), {"path": PATH, "query_string": b""})()
+		)
+		named = [c for c in self.log_error.call_args_list if "host_name" in str(c.kwargs.get("title", ""))]
+		self.assertTrue(named, f"the unset host_name was not named: {self.log_error.call_args_list}")
+
+	def test_a_signature_check_with_host_name_set_does_not_warn(self):
+		"""The control for the config-gap warning: with host_name set (the
+		production configuration), the origin is canonical and nothing logs."""
+		with patch.dict(frappe.local.conf, {"host_name": ORIGIN}):
+			self.adapter._signed_url(
+				type("_R", (), {"path": PATH, "query_string": b""})()
+			)
+		named = [c for c in self.log_error.call_args_list if "host_name" in str(c.kwargs.get("title", ""))]
+		self.assertFalse(named, f"host_name is set but the check still warned: {self.log_error.call_args_list}")
 
 	# --- the capability declaration --------------------------------------
 
@@ -298,9 +347,9 @@ class TestTwilioAdapter(unittest.TestCase):
 	def _received(self, params):
 		"""A request as it actually arrives: proxied, host and scheme rewritten."""
 		return _Request(
-			url="http://10.6.0.35" + PATH,
+			url="http://198.51.100.35" + PATH,
 			form=params,
-			headers={"Host": "10.6.0.35", "X-Forwarded-Proto": "http"},
+			headers={"Host": "198.51.100.35", "X-Forwarded-Proto": "http"},
 			path=PATH,
 			query_string=b"account=Twilio-WhatsApp",
 		)
@@ -343,7 +392,7 @@ class TestTwilioAdapter(unittest.TestCase):
 		Relay's generic `OK` was delivered to a real customer as a WhatsApp
 		message reading "OK" -- once per inbound message, billable, from a
 		handler that thought it was returning an HTTP status line. Observed
-		on this deployment as SMbe309ea9399f98451523ef245c8104c7.
+		on this deployment as SM<redacted>.
 
 		Relay sends its replies through the outbound queue, so this response
 		must never carry content.
@@ -394,7 +443,7 @@ class TestTwilioAdapter(unittest.TestCase):
 		entirely when the header is absent. On a guest-callable endpoint that
 		is a hole; this adapter does not widen it.
 		"""
-		url = "https://rxflow-dev.jollys.dm/api/method/relay.webhooks.handler.receive"
+		url = "https://relay.example/api/method/relay.webhooks.handler.receive"
 		with patch("frappe.request", _Request(url, {"MessageSid": "SM1"})):
 			self.assertFalse(self.adapter.validate_webhook_signature(b"", ""))
 
@@ -483,7 +532,7 @@ class TestTwilioSendRefusals(unittest.TestCase):
 	def _send_with(self, response):
 		with (
 			patch.object(TwilioAdapter, "_resolve_recipient", return_value="whatsapp:+15550001111"),
-			patch.object(TwilioAdapter, "_callback_url", return_value="https://rxflow-dev.jollys.dm/cb"),
+			patch.object(TwilioAdapter, "_callback_url", return_value="https://relay.example/cb"),
 			patch("relay.integrations.twilio_adapter.requests.post", return_value=response),
 			patch("frappe.log_error"),
 		):
@@ -508,7 +557,7 @@ class TestTwilioSendRefusals(unittest.TestCase):
 		"""'Could not reach Twilio' is a moment, not a verdict."""
 		with (
 			patch.object(TwilioAdapter, "_resolve_recipient", return_value="whatsapp:+15550001111"),
-			patch.object(TwilioAdapter, "_callback_url", return_value="https://rxflow-dev.jollys.dm/cb"),
+			patch.object(TwilioAdapter, "_callback_url", return_value="https://relay.example/cb"),
 			patch("relay.integrations.twilio_adapter.requests.post", side_effect=requests.ConnectionError("down")),
 			patch("frappe.log_error"),
 		):

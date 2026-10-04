@@ -67,7 +67,7 @@ class _Request:
 		self.headers = _Headers(headers)
 		# As the proxy delivers it: host rewritten to the backend, scheme
 		# reported as http. Nothing like the URL Twilio signed.
-		self.url = f"http://10.6.0.35{PATH}?{QUERY}"
+		self.url = f"http://198.51.100.35{PATH}?{QUERY}"
 		self.path = PATH
 		self.query_string = QUERY.encode()
 		self.data = b""
@@ -137,6 +137,7 @@ class TestSignatureGate(IntegrationTestCase):
 			patch("frappe.request", request),
 			patch("frappe.db.commit"),
 			patch("frappe.utils.get_url", return_value=ORIGIN),
+			patch("frappe.log_error"),
 		):
 			frappe.local.form_dict = frappe._dict(params)
 			try:

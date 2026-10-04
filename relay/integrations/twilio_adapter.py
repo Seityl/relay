@@ -76,6 +76,10 @@ STATUS_MAP = {
 	"failed": "Failed",
 	"canceled": "Cancelled",
 	"cancelled": "Cancelled",
+	# A Messaging-Service broadcast receipt (1:1 WhatsApp should not send
+	# it, but it is documented): the message left; Delivered would
+	# overclaim, Failed would lie (#13).
+	"partially_delivered": "Sent",
 }
 
 CONTENT_API_ROOT = "https://content.twilio.com/v1"
@@ -381,15 +385,26 @@ class TwilioAdapter(BaseChannelAdapter):
 			return None
 
 		raw = payload.get("MessageStatus") or payload.get("SmsStatus") or ""
+		# The handler branches on Relay statuses and never calls map_status
+		# itself, so the mapping has to happen here. A status Relay cannot
+		# store used to pass through into a Select that refused it,
+		# 500-ing the webhook and losing the batch (#13): it is skipped and
+		# named instead.
+		status = self.map_status(raw)
+		if status is None:
+			frappe.log_error(
+				title=f"Relay Twilio: status {raw!r} for {sid} is not one Relay can store",
+				message=json.dumps(dict(payload)),
+			)
+			return None
+
 		error = {}
 		if payload.get("ErrorCode"):
 			error = {"code": payload.get("ErrorCode"), "message": payload.get("ErrorMessage", "")}
 
 		return StatusEvent(
 			provider_message_id=sid,
-			# The handler branches on Relay statuses and never calls
-			# map_status itself, so the mapping has to happen here.
-			status=self.map_status(raw),
+			status=status,
 			error_payload=error,
 			raw_payload=dict(payload),
 		)
@@ -468,8 +483,12 @@ class TwilioAdapter(BaseChannelAdapter):
 
 	# --- contract --------------------------------------------------------
 
-	def map_status(self, provider_status: str) -> str:
-		return STATUS_MAP.get((provider_status or "").lower(), provider_status)
+	def map_status(self, provider_status: str) -> str | None:
+		"""Map a Twilio status to Relay's vocabulary, or None when Relay
+		cannot store it -- the parser skips the event and names it (#13);
+		guessing or passing an unmapped value through raised ValidationError
+		at the Select and 500'd the webhook."""
+		return STATUS_MAP.get((provider_status or "").lower())
 
 	def normalize_identifier(self, identifier_type: str, value: str) -> str:
 		bare = (value or "").strip()
@@ -493,7 +512,7 @@ class TwilioAdapter(BaseChannelAdapter):
 		Twilio reads the webhook response as TwiML and acts on it. Relay's
 		generic `OK` was delivered to the customer as a WhatsApp message
 		reading "OK", once per inbound message -- observed on this
-		deployment as SMbe309ea9399f98451523ef245c8104c7, and billable.
+		deployment as SM<redacted>, and billable.
 
 		An empty `<Response/>` is the documented way to say "handled, reply
 		with nothing". Relay sends its own replies through the outbound
@@ -531,11 +550,11 @@ class TwilioAdapter(BaseChannelAdapter):
 		bears no resemblance to it -- captured from a real inbound message on
 		this deployment:
 
-		    Host                 10.6.0.35
+		    Host                 198.51.100.35
 		    X-Forwarded-Proto    http
 
-		so `request.url` is `http://10.6.0.35/api/method/...` while Twilio
-		signed `https://rxflow-dev.jollys.dm/api/method/...`. Both the scheme
+		so `request.url` is `http://198.51.100.35/api/method/...` while Twilio
+		signed `https://<the public host>/api/method/...`. Both the scheme
 		and the host are wrong, and the resulting mismatch presents as a bad
 		Auth Token rather than as a proxy problem.
 
@@ -543,9 +562,17 @@ class TwilioAdapter(BaseChannelAdapter):
 		way to undo an arbitrary proxy. The URL Twilio signed is the one we
 		configured, so this rebuilds it from the site's canonical origin and
 		keeps only the path and query string, which the proxy does preserve.
-		`get_url()` reads `host_name` from site config; if that is unset or
-		wrong, signature validation is where it will be noticed.
+		`get_url()` reads `host_name` from site config; when that is unset it
+		falls back to the request's own Host header, so the misconfiguration
+		is named here (#13) instead of surfacing as mystery 401s.
 		"""
+		if not (frappe.local.conf.host_name or frappe.local.conf.hostname):
+			frappe.log_error(
+				title="Relay Twilio: site host_name is not set",
+				message="site_config.json has no host_name/hostname, so the origin Twilio "
+				"signed is rebuilt from the request's own Host header; a proxy rewrite "
+				"will present as an invalid signature.",
+			)
 		origin = frappe.utils.get_url().rstrip("/")
 		query = request.query_string.decode() if request.query_string else ""
 		return f"{origin}{request.path}" + (f"?{query}" if query else "")

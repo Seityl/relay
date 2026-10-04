@@ -19,7 +19,20 @@ import frappe
 import requests
 
 from relay.integrations.base_adapter import PermanentRejection
-from relay.integrations.meta_cloud_api import MetaCloudAPIAdapter
+from relay.integrations.meta_cloud_api import META_STATUS_MAP, MetaCloudAPIAdapter
+
+
+def _relay_message_statuses() -> set[str]:
+	"""Relay Message's status options, read from the doctype JSON."""
+	import pathlib
+
+	data = json.loads(
+		(pathlib.Path(__file__).resolve().parents[2] / "relay" / "doctype" / "relay_message" / "relay_message.json").read_text()
+	)
+	for field in data["fields"]:
+		if field["fieldname"] == "status":
+			return set(field["options"].split("\n"))
+	raise AssertionError("Relay Message has no status field any more")
 
 
 class _MetaAccount:
@@ -47,6 +60,38 @@ class _Response:
 	def raise_for_status(self):
 		if self.status_code >= 400:
 			raise requests.HTTPError(f"{self.status_code} Client Error", response=self)
+
+
+class TestTheMetaStatusVocabulary(unittest.TestCase):
+	"""#13 item 1, Meta's side: the same pass-through default the Twilio
+	adapter had, writing provider vocabulary straight into a Select."""
+
+	def setUp(self):
+		self.adapter = MetaCloudAPIAdapter(_MetaAccount())
+
+	def test_every_mapped_status_is_one_relay_can_store(self):
+		"""A Select field validates on save; the map may only ever produce
+		options that exist on the DocType, read from the JSON rather than
+		from memory."""
+		allowed = _relay_message_statuses()
+		produced = set(META_STATUS_MAP.values())
+
+		self.assertTrue(
+			produced <= allowed,
+			f"these map to statuses Relay Message cannot store: {sorted(produced - allowed)}",
+		)
+
+	def test_an_unknown_status_is_skipped_not_guessed(self):
+		self.assertIsNone(self.adapter.map_status("something-new"))
+		with patch("frappe.log_error") as log_error:
+			event = self.adapter._parse_status_update(
+				{"id": "wamid.unknown-status", "status": "something-new"}
+			)
+		self.assertIsNone(event, "an unmappable status was parsed into an event")
+		named = [
+			c for c in log_error.call_args_list if "something-new" in str(c.kwargs.get("title", ""))
+		]
+		self.assertTrue(named, f"the skipped status was not named: {log_error.call_args_list}")
 
 
 def _meta_error(code, message="Meta says no"):

@@ -109,7 +109,15 @@ def _handle_post() -> Response:
             # WhatsApp message, once per inbound.
             ack = adapter.webhook_ack()
         else:
-            normalized = _empty_payload()
+            # A webhook that identifies no account is refused, not dropped:
+            # a 200 would tell the provider it was delivered and it would
+            # never retry (#13 item 5 -- the silent-loss variant).
+            return _reject(
+                _log,
+                "No Relay Account resolved from this webhook: pass ?account= "
+                "or flag one account is_default_incoming",
+                status=400,
+            )
 
         _process_normalized_payload(normalized, account_name, _log)
         _log.status = "Processed"
@@ -169,13 +177,13 @@ def _signature_from(headers: dict, name: str) -> str:
     return ""
 
 
-def _reject(_log, reason: str) -> Response:
-    """Record why a webhook was refused, and say so in the response."""
-    _log.status = "Failed"
-    _log.error_log = reason
-    _log.save(ignore_permissions=True)
-    frappe.db.commit()
-    return Response(reason, status=401)
+def _reject(_log, reason: str, status: int = 401) -> Response:
+	"""Record why a webhook was refused, and say so in the response."""
+	_log.status = "Failed"
+	_log.error_log = reason
+	_log.save(ignore_permissions=True)
+	frappe.db.commit()
+	return Response(reason, status=status)
 
 
 def _safe_headers(headers: dict) -> dict:
@@ -249,13 +257,6 @@ def _detect_event_type(payload: dict) -> str:
         return changes.get("field", "unknown")
     except (KeyError, IndexError):
         return "unknown"
-
-
-def _empty_payload():
-    """Return an empty normalized payload."""
-    from relay.integrations.base_adapter import InboundPayload
-
-    return InboundPayload()
 
 
 def _process_normalized_payload(normalized, account_name: str | None, log_doc):
