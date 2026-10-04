@@ -58,11 +58,11 @@ class _Form(dict):
 class _JsonRequest:
 	method = "POST"
 
-	def __init__(self, body: bytes):
+	def __init__(self, body: bytes, headers: dict | None = None):
 		self.data = body
 		# One innocuous header so the Failed row's headers carry-over is
 		# observable (an empty dict would make the assert vacuous).
-		self.headers = _Headers({"user-agent": "failure-path-test/1.0"})
+		self.headers = _Headers({"user-agent": "failure-path-test/1.0", **(headers or {})})
 		self.url = f"{ORIGIN}{PATH}?{QUERY}"
 		self.path = PATH
 		self.query_string = QUERY.encode()
@@ -125,7 +125,8 @@ class TestTheWebhookFailurePath(IntegrationTestCase):
 		lesson); the tests assert on the captured calls."""
 		body = json.dumps(payload).encode()
 		signature = "sha256=" + hmac.new(APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
-		request = _JsonRequest(body)
+		# On the wire since #12: Meta's adapter refuses an unsigned request.
+		request = _JsonRequest(body, {"X-Hub-Signature-256": signature})
 		with (
 			patch("frappe.request", request),
 			patch("frappe.db.commit"),
