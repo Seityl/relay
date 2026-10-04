@@ -262,17 +262,23 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 
 		return Response(challenge, status=200)
 
+	def requires_valid_signature(self) -> bool:
+		"""An unsigned request is refused: the app secret is this channel's
+		only signing key, and `receive` is a guest-callable endpoint (#12)."""
+		return True
+
+	def signature_configured(self) -> bool:
+		return bool(self.account.get("app_secret"))
+
 	def validate_webhook_signature(self, payload_bytes: bytes, signature: str) -> bool:
 		"""Validate Meta X-Hub-Signature-256 webhook signature."""
+		if not self.signature_configured():
+			# No app secret configured: the signature cannot be verified, so
+			# it cannot be accepted. The handler refuses with the account's
+			# name before reaching this; the guard keeps validate honest for
+			# any future caller (#12 replaced the old allow-through here).
+			return False
 		secret = self.account.get_app_secret()
-		if not secret:
-			# If no secret configured, allow through but log warning
-			frappe.log_error(
-				title="Relay Meta Webhook: No App Secret",
-				message="Webhook signature cannot be validated because app_secret is empty.",
-			)
-			return True
-
 		expected = "sha256=" + hmac.new(
 			secret.encode("utf-8"),
 			payload_bytes,

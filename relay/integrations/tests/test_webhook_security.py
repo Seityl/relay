@@ -13,10 +13,13 @@ from relay.integrations.meta_cloud_api import MetaCloudAPIAdapter
 
 class _MockAccount:
     def __init__(self, app_secret: str = ""):
-        self._app_secret = app_secret
+        self._fields = {"app_secret": app_secret or None}
+
+    def get(self, key, default=None):
+        return self._fields.get(key, default)
 
     def get_app_secret(self) -> str:
-        return self._app_secret
+        return self._fields.get("app_secret") or ""
 
     def get_access_token(self) -> str:
         return "test_token"
@@ -48,12 +51,22 @@ class TestMetaWebhookSignature(unittest.TestCase):
         adapter = MetaCloudAPIAdapter(_MockAccount(secret))
         self.assertFalse(adapter.validate_webhook_signature(payload, signature))
 
-    def test_missing_secret_allows_through(self):
+    def test_a_signature_cannot_be_verified_without_a_secret(self):
+        """#12: the old behaviour here was allow-through-with-a-warning,
+        pinned by a test whose mock returned "" without throwing. A real
+        Relay Account without the secret makes get_password throw -- and a
+        signature that cannot be verified is not accepted."""
         payload = b'{"object":"whatsapp_business_account"}'
         signature = "sha256=anything"
 
         adapter = MetaCloudAPIAdapter(_MockAccount(""))
-        self.assertTrue(adapter.validate_webhook_signature(payload, signature))
+        self.assertFalse(adapter.validate_webhook_signature(payload, signature))
+
+    def test_a_meta_account_requires_a_valid_signature(self):
+        """#12: Meta's adapter overrides the base default -- an unsigned
+        request on a guest-callable endpoint is refused."""
+        adapter = MetaCloudAPIAdapter(_MockAccount("test_secret"))
+        self.assertTrue(adapter.requires_valid_signature())
 
     def test_signature_case_mismatch(self):
         secret = "test_secret"

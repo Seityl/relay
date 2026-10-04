@@ -87,11 +87,19 @@ def _handle_post() -> Response:
             signature = _signature_from(headers, adapter.signature_header())
 
             if signature:
+                if not adapter.signature_configured():
+                    return _reject(
+                        _log,
+                        f"Relay Account {account_name} has no signing secret "
+                        "configured, so the webhook signature cannot be verified",
+                    )
                 if not adapter.validate_webhook_signature(payload_bytes, signature):
                     return _reject(_log, "Invalid webhook signature")
             elif adapter.requires_valid_signature():
                 # Without this branch, omitting the header is enough to skip
-                # verification altogether on an allow_guest endpoint.
+                # verification altogether on an allow_guest endpoint. Meta
+                # and Twilio require one (#12); the base default is False
+                # only for adapters with no signature scheme at all.
                 return _reject(_log, "Missing webhook signature")
 
             normalized = adapter.parse_inbound_webhook(payload, account_name=account_name)

@@ -72,9 +72,9 @@ class _Form(dict):
 class _JsonRequest:
 	method = "POST"
 
-	def __init__(self, body: bytes):
+	def __init__(self, body: bytes, headers: dict | None = None):
 		self.data = body
-		self.headers = _Headers({})
+		self.headers = _Headers(headers or {})
 		self.url = f"{ORIGIN}{PATH}?{QUERY}"
 		self.path = PATH
 		self.query_string = QUERY.encode()
@@ -140,7 +140,10 @@ class TestAnUndecodableImageAttachment(IntegrationTestCase):
 		Error Log row on the deployed build."""
 		body = json.dumps(payload).encode()
 		signature = "sha256=" + hmac.new(APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
-		request = _JsonRequest(body)
+		# The signature is on the wire: since #12 Meta's adapter refuses an
+		# unsigned request, so "the way Meta does" means sending the header
+		# this class always claimed to be sending.
+		request = _JsonRequest(body, {"X-Hub-Signature-256": signature})
 		with (
 			patch("frappe.request", request),
 			patch("frappe.db.commit"),

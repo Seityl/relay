@@ -514,9 +514,15 @@ class TwilioAdapter(BaseChannelAdapter):
 		The Auth Token is both the API credential and the signing key, so if
 		sending works at all, verification is possible -- there is no
 		configuration in which accepting an unsigned webhook is the right
-		behaviour for this channel.
+		behaviour for this channel. (#12: this used to read the token here,
+		which threw on an account without one; the presence check lives in
+		`signature_configured`, so a missing token is a named 401, not a
+		500 -- #13's item 2.)
 		"""
-		return bool(self.account.get_access_token())
+		return True
+
+	def signature_configured(self) -> bool:
+		return bool(self.account.get("access_token"))
 
 	def _signed_url(self, request) -> str:
 		"""The URL Twilio signed, which is not the one we receive.
@@ -554,6 +560,8 @@ class TwilioAdapter(BaseChannelAdapter):
 		against the merged dict would fail as soon as the callback URL grew
 		a `?account=` parameter -- which it always has.
 		"""
+		if not self.signature_configured():
+			return False
 		token = self.account.get_access_token()
 		if not token or not signature:
 			return False

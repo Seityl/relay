@@ -146,17 +146,24 @@ class BaseChannelAdapter(ABC):
 		"""
 		return "X-Hub-Signature-256"
 
+	def signature_configured(self) -> bool:
+		"""Whether the account carries the secret this adapter verifies with.
+
+		Checked without decrypting: a Password field reads back as the
+		masked value when set and None when not, so a missing secret is
+		visible without `get_password`'s throw. The handler refuses a
+		signed request naming the account when this is False (#12, #13).
+		"""
+		return True
+
 	def requires_valid_signature(self) -> bool:
 		"""Whether an unsigned request must be rejected.
 
 		The handler only validates when a signature is present, so returning
 		False means an attacker can skip verification by omitting the header
-		on a guest-callable endpoint. The default is False because that is
-		the behaviour the Meta adapter was built and tested against -- it
-		returns True from `validate_webhook_signature` when no app secret is
-		configured, and `test_missing_secret_allows_through` pins that. An
-		adapter that can always verify should return True and close the hole
-		for its own channel.
+		on a guest-callable endpoint. The default is False because adapters
+		with no signature scheme at all have nothing to require; Meta (#12)
+		and Twilio return True.
 		"""
 		return False
 
