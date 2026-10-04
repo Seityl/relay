@@ -38,6 +38,13 @@ class _Account:
 	identifier_value = "15550002222"
 	credentials = json.dumps({"account_sid": "AC00000000000000000000000000000000"})
 
+	def get(self, key, default=None):
+		# #12: the adapter checks signing-secret presence without decrypting
+		# -- a set Password field reads back masked-but-truthy.
+		if key == "access_token":
+			return AUTH_TOKEN
+		return default
+
 	def get_access_token(self):
 		return AUTH_TOKEN
 
