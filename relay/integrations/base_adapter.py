@@ -172,8 +172,11 @@ class BaseChannelAdapter(ABC):
 		return False
 
 	@abstractmethod
-	def map_status(self, provider_status: str) -> str:
-		"""Map provider status string to a Relay Message status."""
+	def map_status(self, provider_status: str) -> str | None:
+		"""Map a provider status to a Relay Message status, or None when
+		Relay cannot store it -- the parser then skips the event and names
+		it (#13). Passing an unmapped value through raised ValidationError
+		at the Select and 500'd the webhook."""
 
 	def supports(self, feature: str) -> bool:
 		"""Return whether this adapter supports a capability.

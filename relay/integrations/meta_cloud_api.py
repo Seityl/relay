@@ -69,6 +69,17 @@ TEMPLATE_STATUS_MAP = {
 	"UNARCHIVED": None,  # back to whatever it was; Meta does not say what
 }
 
+#: Meta's message status updates -> Relay Message statuses
+#: (relay_message.json). Meta documents sent/delivered/read/failed; an
+#: unknown one is skipped and named, never written (#13).
+META_STATUS_MAP = {
+	"sent": "Sent",
+	"delivered": "Delivered",
+	"read": "Read",
+	"failed": "Failed",
+	"deleted": "Failed",
+}
+
 
 def _meta_error_body(response) -> dict:
 	"""Meta's error object ({message, type, code, ...}); {} if not one.
@@ -319,7 +330,9 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 			result.messages.append(self._parse_inbound_message(message, contacts))
 
 		for status in value.get("statuses", []):
-			result.status_events.append(self._parse_status_update(status))
+			event = self._parse_status_update(status)
+			if event:
+				result.status_events.append(event)
 
 	def _resolve_account(self, phone_id: str | None) -> str:
 		"""Resolve provider phone number id to a Relay Account."""
@@ -392,11 +405,20 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 			raw_payload=message,
 		)
 
-	def _parse_status_update(self, status: dict) -> StatusEvent:
-		"""Normalize a Meta status update."""
+	def _parse_status_update(self, status: dict) -> StatusEvent | None:
+		"""Normalize a Meta status update; None (skipped, named) when the
+		status is not one Relay can store (#13)."""
+		raw = status.get("status", "")
+		mapped = self.map_status(raw)
+		if mapped is None:
+			frappe.log_error(
+				title=f"Relay Meta: status {raw!r} for {status.get('id', '')} is not one Relay can store",
+				message=json.dumps(dict(status)),
+			)
+			return None
 		return StatusEvent(
 			provider_message_id=status.get("id", ""),
-			status=self.map_status(status.get("status", "")),
+			status=mapped,
 			conversation_id=status.get("conversation", {}).get("id", ""),
 			error_payload=status.get("errors", {}),
 			raw_payload=status,
@@ -428,16 +450,10 @@ class MetaCloudAPIAdapter(BaseChannelAdapter):
 			)
 		)
 
-	def map_status(self, provider_status: str) -> str:
-		"""Map Meta status strings to Relay Message statuses."""
-		mapping = {
-			"sent": "Sent",
-			"delivered": "Delivered",
-			"read": "Read",
-			"failed": "Failed",
-			"deleted": "Failed",
-		}
-		return mapping.get(provider_status, provider_status)
+	def map_status(self, provider_status: str) -> str | None:
+		"""Map a Meta status to Relay's vocabulary, or None when Relay
+		cannot store it -- the parser skips the event and names it (#13)."""
+		return META_STATUS_MAP.get(provider_status)
 
 	def supports(self, feature: str) -> bool:
 		"""Meta Cloud API supports templates, media, interactive, and read receipts."""
